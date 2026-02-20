@@ -29,52 +29,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="add Project">
-      <change afterPath="$PROJECT_DIR$/.idea/MypyPlugin.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/ProjectComplex.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/QtSettings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/editor.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config/app_config.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/default_config.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/full_distance/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/full_distance/full_distance.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/claster_detect.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/objects_detect.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/speed_detect.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/api.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/cluster_1.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/cluster_2.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/cluster_3.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/prototypes/cluster_4.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/requirements.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/MainWindow.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ModelTypes.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ModelTypes.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/RegressionTab.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/RegressionTab.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/ResultView.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/RunnerClient.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -199,8 +154,25 @@
       <workItem from="1771590668016" duration="1493000" />
       <workItem from="1771592842856" duration="8000" />
       <workItem from="1771593031411" duration="8976000" />
-      <workItem from="1771609999168" duration="31000" />
+      <workItem from="1771609999168" duration="1365000" />
     </task>
+    <task id="LOCAL-00001" summary="add Project">
+      <option name="closed" value="true" />
+      <created>1771611776132</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1771611776132</updated>
+    </task>
+    <task id="LOCAL-00002" summary="add Project">
+      <option name="closed" value="true" />
+      <created>1771612203701</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1771612203701</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
