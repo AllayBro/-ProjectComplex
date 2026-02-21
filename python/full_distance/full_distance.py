@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 
 from python.runner import run_full_distance
 
-
 def run(image_path: str, out_dir: str, cfg: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     device_mode = str(cfg.get("device", {}).get("mode", "auto"))
     res = run_full_distance(image_path, out_dir, device_mode, cfg)
