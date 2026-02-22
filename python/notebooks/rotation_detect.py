@@ -1999,3 +1999,21 @@ run_pipeline()
 
 # # Запуск построения графиков
 # evaluate_and_plot_graphs(iou_match_thr=0.3, rotate_test=True)
+
+def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
+    """
+    Должна вернуть dict в формате ModuleResult:
+    {
+      "module_id": "...",
+      "image_w": int,
+      "image_h": int,
+      "device_used": "gpu|cpu",
+      "warnings": [..],
+      "annotated_image_path": "...",
+      "cleaned_image_path": "...",
+      "artifacts": {...},
+      "timings_ms": {...},
+      "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
+    }
+    """
+    raise NotImplementedError("Замените телo run() на вызов вашей логики внутри этого файла и сбор результата в dict ModuleResult")

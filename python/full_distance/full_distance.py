@@ -1,25 +1,78 @@
-from __future__ import annotations
-
+import os
 from typing import Any, Dict, Optional
 
-from python.runner import run_full_distance
+import cv2
 
-def run(image_path: str, out_dir: str, cfg: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    device_mode = str(cfg.get("device", {}).get("mode", "auto"))
-    res = run_full_distance(image_path, out_dir, device_mode, cfg)
+from prototypes.api import (
+    now_ms, ensure_dir, load_image_any,
+    DeviceManager, DeviceChoice,
+    VehicleDetector, union_merge_boxes,
+    DistanceEstimator, Cleanup, draw_annotated, write_csv_distance
+)
 
-    artifacts = []
-    p = str(res.get("annotated_image_path", "") or "")
-    if p:
-        artifacts.append(p)
-    p = str(res.get("cleaned_image_path", "") or "")
-    if p:
-        artifacts.append(p)
 
-    art = res.get("artifacts", {}) or {}
-    if isinstance(art, dict):
-        for v in art.values():
-            if isinstance(v, str) and v:
-                artifacts.append(v)
+def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "auto", state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    ensure_dir(out_dir)
+    img = load_image_any(image_path)
+    h, w = img.shape[:2]
 
-    return {"artifacts": artifacts, "data": res}
+    dev_cfg = cfg.get("device", {})
+    gpu_id = int(dev_cfg.get("gpu_id", 0))
+    fallback = bool(dev_cfg.get("fallback_to_cpu", True))
+
+    warnings = []
+    t0 = now_ms()
+
+    dev = DeviceManager.pick(device_mode, gpu_id, fallback)
+    detector = VehicleDetector(cfg["detector"].get("model_path", "yolov8n.pt"))
+
+    inference_ms = 0
+    try:
+        dets, tms = detector.predict(img, cfg, dev)
+        inference_ms += int(tms.get("inference_ms", 0))
+    except Exception:
+        if fallback:
+            warnings.append("gpu_failed_fallback_to_cpu")
+            dev = DeviceChoice("cpu", "cpu")
+            dets, tms = detector.predict(img, cfg, dev)
+            inference_ms += int(tms.get("inference_ms", 0))
+        else:
+            raise
+
+    if cfg.get("union_nms", {}).get("enabled", True):
+        dets = union_merge_boxes(dets, float(cfg.get("union_nms", {}).get("iou", 0.55)))
+
+    de = DistanceEstimator()
+    dets = [de.estimate(img, d, cfg) for d in dets]
+
+    cleaned = Cleanup.cleanup_image(img, dets, cfg)
+    cleaned_path = os.path.abspath(os.path.join(out_dir, "cleaned_only_vehicles.jpg"))
+    cv2.imwrite(cleaned_path, cleaned)
+
+    annotated = draw_annotated(img, dets)
+    annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_full.jpg"))
+    cv2.imwrite(annotated_path, annotated)
+
+    t1 = now_ms()
+    timings_ms = {
+        "total": int(t1 - t0),
+        "preprocess": 0,
+        "inference": int(inference_ms),
+        "postprocess": int(max(0, (t1 - t0) - inference_ms))
+    }
+
+    csv_path = os.path.abspath(os.path.join(out_dir, "distance_results.csv"))
+    write_csv_distance(csv_path, image_path, dets, dev.device_used, timings_ms)
+
+    return {
+        "module_id": "distance_full",
+        "image_w": int(w),
+        "image_h": int(h),
+        "device_used": dev.device_used,
+        "warnings": warnings,
+        "annotated_image_path": annotated_path,
+        "cleaned_image_path": cleaned_path,
+        "artifacts": {"csv_path": csv_path},
+        "timings_ms": timings_ms,
+        "detections": dets
+    }

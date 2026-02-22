@@ -1,13 +1,17 @@
+import argparse
 import json
 import os
 import time
+import sys
+import importlib
+import inspect
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import cv2
 from PIL import Image, ImageOps
-
 from ultralytics import YOLO
 
 try:
@@ -15,9 +19,24 @@ try:
 except Exception:
     torch = None
 
+_THIS_DIR = Path(__file__).resolve().parent
+_EXE_DIR = _THIS_DIR.parent  # папка рядом с python/
+if str(_EXE_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXE_DIR))
+
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def read_json(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path: str, obj: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
 def ensure_dir(p: str) -> None:
@@ -175,7 +194,6 @@ class VehicleDetector:
                 y1 = clamp(y1, 0, h - 1)
                 x2 = clamp(x2, 0, w - 1)
                 y2 = clamp(y2, 0, h - 1)
-
                 bw = max(0, x2 - x1)
                 bh = max(0, y2 - y1)
                 if bw < min_box_px or bh < min_box_px:
@@ -218,11 +236,13 @@ class RotationEstimator:
         e = cv2.Canny(g, int(rot_cfg.get("canny1", 60)), int(rot_cfg.get("canny2", 180)))
 
         lines = cv2.HoughLinesP(
-            e, 1, np.pi / 180.0,
+            e,
+            1,
+            np.pi / 180.0,
             threshold=int(rot_cfg.get("hough_threshold", 60)),
             minLineLength=int(rot_cfg.get("min_line_length", 40)),
             maxLineGap=int(rot_cfg.get("max_line_gap", 10)),
-                  )
+            )
 
         angs: List[float] = []
         if lines is not None:
@@ -393,7 +413,7 @@ def draw_annotated(img_bgr: np.ndarray, dets: List[Dict[str, Any]]) -> np.ndarra
     return out
 
 
-def write_csv_distance(path: str, image_path: str, dets: List[Dict[str, Any]], device_used: str, timings_ms: Dict[str, Any]) -> None:
+def write_csv(path: str, image_path: str, dets: List[Dict[str, Any]], device_used: str, timings_ms: Dict[str, Any]) -> None:
     header = "filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,distance_m,device,inference_ms,total_ms\n"
     base = os.path.basename(image_path)
 
@@ -415,3 +435,220 @@ def write_csv_distance(path: str, image_path: str, dets: List[Dict[str, Any]], d
 
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
+
+def _call_module_entry(mod, image_path: str, out_dir: str, cfg: dict, device_mode: str):
+    candidates = []
+    if hasattr(mod, "run") and callable(getattr(mod, "run")):
+        candidates.append(getattr(mod, "run"))
+    if hasattr(mod, "main") and callable(getattr(mod, "main")):
+        candidates.append(getattr(mod, "main"))
+    if hasattr(mod, "process_one") and callable(getattr(mod, "process_one")):
+        candidates.append(getattr(mod, "process_one"))
+    if hasattr(mod, "process_image") and callable(getattr(mod, "process_image")):
+        candidates.append(getattr(mod, "process_image"))
+
+    if not candidates:
+        raise RuntimeError(f"Модуль {mod.__name__} не содержит run/main/process_one/process_image")
+
+    last_err = None
+    for fn in candidates:
+        try:
+            sig = inspect.signature(fn)
+            kwargs = {}
+            if "image_path" in sig.parameters:
+                kwargs["image_path"] = image_path
+            if "out_dir" in sig.parameters:
+                kwargs["out_dir"] = out_dir
+            if "cfg" in sig.parameters:
+                kwargs["cfg"] = cfg
+            if "device_mode" in sig.parameters:
+                kwargs["device_mode"] = device_mode
+            if "device" in sig.parameters:
+                kwargs["device"] = device_mode
+            return fn(**kwargs)
+        except Exception as e:
+            last_err = e
+    raise last_err
+
+
+def _maybe_run_notebook_cluster(cluster_id: int, image_path: str, out_dir: str, device_mode: str, cfg: dict):
+    mapping = {
+        1: "python.notebooks.vehicle_detect",
+        2: "python.notebooks.rotation_detect",
+        3: "python.notebooks.claster_detect",
+        4: "python.notebooks.objects_detect",
+    }
+    mod_name = mapping.get(int(cluster_id))
+    if not mod_name:
+        return None
+
+    mod = importlib.import_module(mod_name)
+    res = _call_module_entry(mod, image_path=image_path, out_dir=out_dir, cfg=cfg, device_mode=device_mode)
+    return res
+def run_cluster(cluster_id: int, image_path: str, out_dir: str, device_mode: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    ensure_dir(out_dir)
+    nb = _maybe_run_notebook_cluster(cluster_id, image_path, out_dir, device_mode, cfg)
+    if isinstance(nb, dict) and "module_id" in nb and "detections" in nb:
+        return nb
+    img = load_image_any(image_path)
+    h, w = img.shape[:2]
+
+    dev_cfg = cfg.get("device", {})
+    gpu_id = int(dev_cfg.get("gpu_id", 0))
+    fallback = bool(dev_cfg.get("fallback_to_cpu", True))
+
+    warnings: List[str] = []
+    t_total0 = now_ms()
+
+    dev = DeviceManager.pick(device_mode, gpu_id, fallback)
+    detector = VehicleDetector(cfg["detector"].get("model_path", "yolov8n.pt"))
+
+    inference_ms = 0
+    try:
+        dets, tms = detector.predict(img, cfg, dev)
+        inference_ms += int(tms.get("inference_ms", 0))
+    except Exception as e:
+        if fallback:
+            warnings.append("gpu_failed_fallback_to_cpu")
+            dev = DeviceChoice("cpu", "cpu")
+            dets, tms = detector.predict(img, cfg, dev)
+            inference_ms += int(tms.get("inference_ms", 0))
+        else:
+            raise
+
+    if cfg.get("union_nms", {}).get("enabled", True):
+        dets = union_merge_boxes(dets, float(cfg.get("union_nms", {}).get("iou", 0.55)))
+
+    if cluster_id == 2:
+        re = RotationEstimator()
+        dets = [re.estimate(img, d, cfg) for d in dets]
+
+    if cluster_id == 3:
+        ref = ClusterRefiner(detector)
+        dets, _ = ref.refine(img, dets, cfg, dev)
+
+    if cluster_id == 4:
+        de = DistanceEstimator()
+        dets = [de.estimate(img, d, cfg) for d in dets]
+
+    annotated = draw_annotated(img, dets)
+    annotated_path = os.path.join(out_dir, f"annotated_cluster_{cluster_id}.jpg")
+    cv2.imwrite(annotated_path, annotated)
+
+    t_total1 = now_ms()
+
+    return {
+        "module_id": f"cluster_{cluster_id}",
+        "image_w": int(w),
+        "image_h": int(h),
+        "device_used": dev.device_used,
+        "warnings": warnings,
+        "annotated_image_path": annotated_path,
+        "cleaned_image_path": "",
+        "artifacts": {},
+        "timings_ms": {
+            "total": int(t_total1 - t_total0),
+            "preprocess": 0,
+            "inference": int(inference_ms),
+            "postprocess": int(max(0, (t_total1 - t_total0) - inference_ms))
+        },
+        "detections": dets
+    }
+
+
+def run_full_distance(image_path: str, out_dir: str, device_mode: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    ensure_dir(out_dir)
+    img = load_image_any(image_path)
+    h, w = img.shape[:2]
+
+    dev_cfg = cfg.get("device", {})
+    gpu_id = int(dev_cfg.get("gpu_id", 0))
+    fallback = bool(dev_cfg.get("fallback_to_cpu", True))
+
+    warnings: List[str] = []
+    t_total0 = now_ms()
+
+    dev = DeviceManager.pick(device_mode, gpu_id, fallback)
+    detector = VehicleDetector(cfg["detector"].get("model_path", "yolov8n.pt"))
+
+    inference_ms = 0
+    try:
+        dets, tms = detector.predict(img, cfg, dev)
+        inference_ms += int(tms.get("inference_ms", 0))
+    except Exception as e:
+        if fallback:
+            warnings.append("gpu_failed_fallback_to_cpu")
+            dev = DeviceChoice("cpu", "cpu")
+            dets, tms = detector.predict(img, cfg, dev)
+            inference_ms += int(tms.get("inference_ms", 0))
+        else:
+            raise
+
+    if cfg.get("union_nms", {}).get("enabled", True):
+        dets = union_merge_boxes(dets, float(cfg.get("union_nms", {}).get("iou", 0.55)))
+
+    de = DistanceEstimator()
+    dets = [de.estimate(img, d, cfg) for d in dets]
+
+    cleaned = Cleanup.cleanup_image(img, dets, cfg)
+    cleaned_path = os.path.join(out_dir, "cleaned_only_vehicles.jpg")
+    cv2.imwrite(cleaned_path, cleaned)
+
+    annotated = draw_annotated(img, dets)
+    annotated_path = os.path.join(out_dir, "annotated_full.jpg")
+    cv2.imwrite(annotated_path, annotated)
+
+    t_total1 = now_ms()
+
+    timings_ms = {
+        "total": int(t_total1 - t_total0),
+        "preprocess": 0,
+        "inference": int(inference_ms),
+        "postprocess": int(max(0, (t_total1 - t_total0) - inference_ms))
+    }
+
+    csv_path = os.path.join(out_dir, "distance_results.csv")
+    write_csv(csv_path, image_path, dets, dev.device_used, timings_ms)
+
+    return {
+        "module_id": "distance_full",
+        "image_w": int(w),
+        "image_h": int(h),
+        "device_used": dev.device_used,
+        "warnings": warnings,
+        "annotated_image_path": annotated_path,
+        "cleaned_image_path": cleaned_path,
+        "artifacts": {
+            "csv_path": csv_path
+        },
+        "timings_ms": timings_ms,
+        "detections": dets
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--task", required=True, choices=["cluster", "distance_full"])
+    ap.add_argument("--cluster-id", type=int, default=0)
+    ap.add_argument("--input", required=True)
+    ap.add_argument("--output-dir", required=True)
+    ap.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"])
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--result-json", required=True)
+    args = ap.parse_args()
+
+    cfg = read_json(args.config)
+
+    if args.task == "cluster":
+        if args.cluster_id not in (1, 2, 3, 4):
+            raise SystemExit("cluster-id must be 1..4")
+        res = run_cluster(args.cluster_id, args.input, args.output_dir, args.device, cfg)
+    else:
+        res = run_full_distance(args.input, args.output_dir, args.device, cfg)
+
+    write_json(args.result_json, res)
+    print("OK")
+
+
+if __name__ == "__main__":
+    main()
