@@ -29,21 +29,20 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="add Project">
-      <change afterPath="$PROJECT_DIR$/python/runner_delete.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/default_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/python/default_config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/full_distance/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/full_distance/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/full_distance/full_distance.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/full_distance/full_distance.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/claster_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/claster_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/objects_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/objects_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/speed_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/speed_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/prototypes/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/prototypes/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_1.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/cluster_1.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_2.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/cluster_2.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_3.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/cluster_3.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_4.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/prototypes/cluster_4.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/runner_delete.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -180,7 +179,9 @@
       <workItem from="1771593031411" duration="8976000" />
       <workItem from="1771609999168" duration="4647000" />
       <workItem from="1771646873648" duration="4764000" />
-      <workItem from="1771746328334" duration="551000" />
+      <workItem from="1771746328334" duration="1796000" />
+      <workItem from="1771780132107" duration="456000" />
+      <workItem from="1771784880172" duration="3976000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -222,7 +223,15 @@
       <option name="project" value="LOCAL" />
       <updated>1771649023587</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="add Project">
+      <option name="closed" value="true" />
+      <created>1771770239605</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1771770239605</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

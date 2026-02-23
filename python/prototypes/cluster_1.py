@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 
 import cv2
 
-from .api import now_ms, ensure_dir, load_image_any, DeviceManager, DeviceChoice, VehicleDetector, union_merge_boxes, draw_annotated
+from .api import now_ms, ensure_dir, load_image_any, DeviceManager, DeviceChoice, VehicleDetector, union_merge_boxes, PostProcessor, draw_annotated
 
 
 def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "auto", state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -19,14 +19,24 @@ def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "
     t0 = now_ms()
 
     dev = DeviceManager.pick(device_mode, gpu_id, fallback)
-    detector = VehicleDetector(cfg["detector"].get("model_path", "yolov8n.pt"))
+
+    model_path = str(cfg.get("detector", {}).get("model_path", "yolov8n.pt"))
+    detector = None
+    if state is not None:
+        detector = state.get("detector", None)
+        if detector is not None and getattr(detector, "model_path", None) != model_path:
+            detector = None
+    if detector is None:
+        detector = VehicleDetector(model_path)
+        if state is not None:
+            state["detector"] = detector
 
     inference_ms = 0
     try:
         dets, tms = detector.predict(img, cfg, dev)
         inference_ms += int(tms.get("inference_ms", 0))
-    except Exception as e:
-        if fallback:
+    except Exception:
+        if fallback and dev.device_used == "gpu":
             warnings.append("gpu_failed_fallback_to_cpu")
             dev = DeviceChoice("cpu", "cpu")
             dets, tms = detector.predict(img, cfg, dev)
@@ -36,6 +46,8 @@ def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "
 
     if cfg.get("union_nms", {}).get("enabled", True):
         dets = union_merge_boxes(dets, float(cfg.get("union_nms", {}).get("iou", 0.55)))
+
+    dets = PostProcessor.apply(w, h, dets, cfg)
 
     annotated = draw_annotated(img, dets)
     annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_1.jpg"))

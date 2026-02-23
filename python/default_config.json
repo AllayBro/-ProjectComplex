@@ -1,0 +1,71 @@
+{
+  "device": {
+    "gpu_id": 0,
+    "fallback_to_cpu": true
+  },
+
+  "detector": {
+    "model_path": "yolov8n.pt",
+    "imgsz": 1280,
+    "conf": 0.15,
+    "iou": 0.50,
+    "max_det": 300
+  },
+
+  "union_nms": {
+    "enabled": true,
+    "iou": 0.55
+  },
+
+  "postprocess": {
+    "enabled": true,
+    "keep_classes": ["car", "truck", "bus", "van", "motorcycle"],
+    "min_conf": 0.15,
+    "min_box_px": 14,
+    "min_area_frac": 0.00002,
+    "aspect_ratio_min": 0.35,
+    "aspect_ratio_max": 4.50,
+    "exclude_top_frac": 0.00,
+    "exclude_bottom_frac": 0.00,
+    "containment": {
+      "enabled": true,
+      "cover_thr": 0.92,
+      "conf_margin": 0.02
+    },
+    "nms": {
+      "enabled": false,
+      "iou": 0.60
+    }
+  },
+
+  "cluster_refine": {
+    "enabled": true,
+    "roi_scale": 2.0,
+    "roi_min_size": 640,
+    "imgsz": 1280,
+    "conf": 0.15,
+    "iou": 0.40,
+    "max_det": 300
+  },
+
+  "rotation": {
+    "enabled": true
+  },
+
+  "distance": {
+    "focal_mm": 4.25,
+    "sensor_width_mm": 5.60,
+    "vehicle_heights_m": {
+      "car": 1.50,
+      "van": 2.20,
+      "truck": 3.00,
+      "bus": 3.20,
+      "motorcycle": 1.30
+    },
+    "default_height_m": 1.50
+  },
+
+  "cleanup": {
+    "pad_frac": 0.03
+  }
+}
