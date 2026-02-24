@@ -72,6 +72,7 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             QDir().mkpath(out);
 
             m_view->clearAll();
+            m_view->setBeforeImage(in);
             m_runner->runCluster(clusterId, in, out, dev);
         });
     }

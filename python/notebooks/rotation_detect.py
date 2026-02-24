@@ -7,37 +7,41 @@ Original file is located at
     https://colab.research.google.com/drive/1mjaWH214N4NvDg7NiFbxqeHgUwz3VzyR
 """
 
-# v1.12 - Фиксы углов
 
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# Цель: Добиться максимальной точности распознавания по X, Y, Z, R! - координаты плохие
-# Цель: Распознавание вертикали машины (чтобы понял, что это перевернутая машина + не должны меняться данные, если изменение коснулось только по R)
-# Цель: Поставить 3D - линии, чтобы понять,как распозналась машина
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-# =========================================================
-# Проблема: не распознал перевернутую машину
-# =========================================================
-
-!pip -q install opencv-python-headless==4.10.0.84 ultralytics==8.3.39 pillow-heif pandas matplotlib
-
-import math, json
+import math, json, os, time
 import numpy as np
 import cv2
-import pandas as pd
-import matplotlib.pyplot as plt
+
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
 
 from ultralytics import YOLO
-from google.colab import files
+
+try:
+    from google.colab import files
+except Exception:
+    files = None
+
 from PIL import Image, ImageOps
-import pillow_heif
 from io import BytesIO
 
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
 except Exception:
-    pass
+    pillow_heif = None
+
+try:
+    import torch
+except Exception:
+    torch = None
 
 CAR_CLASSES = {2, 3, 5, 7}
 
@@ -55,6 +59,11 @@ def read_image_auto(file_bytes: bytes):
         print("HEIC read error:", repr(e))
         return None
 
+def read_image_path(image_path: str):
+    with open(image_path, "rb") as f:
+        data = f.read()
+    return read_image_auto(data)
+
 
 # Детектор машин (YOLOv11l + тайлинг + NMS)
 
@@ -65,6 +74,8 @@ yolo = YOLO("yolo11n.pt")
 # model = YOLO("yolo11m.pt")   # medium
 # model = YOLO("yolo11l.pt")   # large
 # model = YOLO("yolo11x.pt")   # x-large
+
+YOLO_DEVICE_ARG = None
 
 def rotate_bound(img_bgr: np.ndarray, angle_deg: float):
     """
@@ -471,6 +482,8 @@ def bbox_from_work_to_original(bbox_work_xyxy, W0: int, H0: int, rot_k: int):
 
 def _run_yolo_cars(im_bgr, conf, iou, imgsz, max_det, tta=False):
     kwargs = dict(conf=conf, iou=iou, imgsz=imgsz, max_det=max_det, verbose=False)
+    if "YOLO_DEVICE_ARG" in globals() and YOLO_DEVICE_ARG is not None:
+        kwargs["device"] = YOLO_DEVICE_ARG
     if tta:
         kwargs["augment"] = True
 
@@ -1690,6 +1703,8 @@ UPLOADED_BYTES = {}
 UPLOADED_IMAGES = {}
 
 def run_pipeline():
+    if files is None:
+        raise RuntimeError("run_pipeline() доступен только в Google Colab (files.upload). Используйте run().")
     global UPLOADED_BYTES, UPLOADED_IMAGES
     UPLOADED_BYTES = files.upload()
     UPLOADED_IMAGES = {}
@@ -1723,282 +1738,6 @@ def run_pipeline():
 
 run_pipeline()
 
-# # ГРАФИКИ
-# def _ang_diff_deg(a, b):
-#     if a is None or b is None:
-#         return None
-#     if (not np.isfinite(a)) or (not np.isfinite(b)):
-#         return None
-#     d = (float(a) - float(b) + 180.0) % 360.0 - 180.0
-#     return abs(d)
-
-# def _iou_xyxy_int(a, b):
-#     ax1, ay1, ax2, ay2 = map(int, a)
-#     bx1, by1, bx2, by2 = map(int, b)
-#     ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-#     ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-#     iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
-#     inter = iw * ih
-#     au = max(0, ax2 - ax1) * max(0, ay2 - ay1)
-#     bu = max(0, bx2 - bx1) * max(0, by2 - by1)
-#     return inter / (au + bu - inter + 1e-9)
-
-# def _bbox_min_side(row):
-#     x1, y1, x2, y2 = row["bbox"]
-#     return float(min(max(0, x2 - x1), max(0, y2 - y1)))
-
-# def _rotate_image_k90(img_bgr, k):
-#     return rotate_k90_bgr(img_bgr, k)
-
-# def _map_bbox_to_base(bbox_xyxy, W_base, H_base, k_applied):
-#     """
-#     bbox_xyxy задан в координатах изображения, полученного поворотом base на k_applied*90 (CW).
-#     Возвращает bbox в координатах base.
-#     """
-#     k_inv = (-int(k_applied)) % 4
-#     if k_applied % 2 == 0:
-#         W_from, H_from = W_base, H_base
-#     else:
-#         W_from, H_from = H_base, W_base
-#     bbox_base, _, _ = bbox_rotate_k90(bbox_xyxy, W_from, H_from, k_inv)
-#     x1, y1, x2, y2 = bbox_base
-#     x1 = max(0, min(int(x1), W_base - 1))
-#     x2 = max(0, min(int(x2), W_base - 1))
-#     y1 = max(0, min(int(y1), H_base - 1))
-#     y2 = max(0, min(int(y2), H_base - 1))
-#     return [x1, y1, x2, y2]
-
-# def _rows_to_df(rows, file_name):
-#     if not rows:
-#         return pd.DataFrame(columns=[
-#             "file", "id", "conf", "bbox", "bbox_min_side",
-#             "X-pos", "Y-pos", "Z-pos", "R-pos", "R-img",
-#             "pose_src"
-#         ])
-#     df = pd.DataFrame(rows)
-#     df["file"] = file_name
-#     df["bbox_min_side"] = df.apply(_bbox_min_side, axis=1)
-#     return df
-
-# def _plot_hist(series, title, xlabel, bins=36):
-#     s = pd.to_numeric(series, errors="coerce").dropna().values
-#     if len(s) == 0:
-#         print(f"Нет данных для графика: {title}")
-#         return
-#     plt.figure(figsize=(10, 5))
-#     plt.hist(s, bins=bins)
-#     plt.title(title)
-#     plt.xlabel(xlabel)
-#     plt.ylabel("Количество")
-#     plt.grid(True, alpha=0.3)
-#     plt.show()
-
-# def _plot_bar_counts(labels, counts, title, xlabel, ylabel):
-#     plt.figure(figsize=(10, 5))
-#     x = np.arange(len(labels))
-#     plt.bar(x, counts)
-#     plt.xticks(x, labels, rotation=0)
-#     plt.title(title)
-#     plt.xlabel(xlabel)
-#     plt.ylabel(ylabel)
-#     plt.grid(True, axis="y", alpha=0.3)
-#     plt.show()
-
-# def _plot_rate_by_bins(df, x_col, y_bool_col, bins, title, xlabel, ylabel):
-#     x = pd.to_numeric(df[x_col], errors="coerce")
-#     y = df[y_bool_col].astype(bool)
-#     ok = x.notna()
-#     x = x[ok]
-#     y = y[ok]
-#     if len(x) == 0:
-#         print(f"Нет данных для графика: {title}")
-#         return
-
-#     cats = pd.cut(x, bins=bins, include_lowest=True)
-#     grp = pd.DataFrame({"xbin": cats, "y": y}).groupby("xbin")["y"]
-#     rate = grp.mean()
-#     n = grp.size()
-
-#     plt.figure(figsize=(12, 5))
-#     plt.plot(np.arange(len(rate)), rate.values, marker="o")
-#     plt.ylim(0.0, 1.0)
-#     plt.title(title)
-#     plt.xlabel(xlabel)
-#     plt.ylabel(ylabel)
-#     plt.grid(True, alpha=0.3)
-#     plt.xticks(np.arange(len(rate)), [f"{i}" for i in rate.index.astype(str)], rotation=45, ha="right")
-#     for i, (rv, nn) in enumerate(zip(rate.values, n.values)):
-#         plt.text(i, min(0.98, rv + 0.03), str(int(nn)), ha="center", va="bottom", fontsize=9)
-#     plt.show()
-
-# def _plot_boxplot_by_rotation(deltas_by_k, title, ylabel):
-#     ks = sorted(deltas_by_k.keys())
-#     data = [np.asarray(deltas_by_k[k], dtype=float) for k in ks]
-#     labels = [f"{k*90}°" for k in ks]
-#     data = [d[~np.isnan(d)] for d in data]
-#     if all(len(d) == 0 for d in data):
-#         print(f"Нет данных для графика: {title}")
-#         return
-#     plt.figure(figsize=(10, 5))
-#     plt.boxplot(data, labels=labels, showfliers=False)
-#     plt.title(title)
-#     plt.xlabel("Поворот входного изображения")
-#     plt.ylabel(ylabel)
-#     plt.grid(True, axis="y", alpha=0.3)
-#     plt.show()
-
-# def evaluate_and_plot_graphs(iou_match_thr=0.3, rotate_test=True):
-#     """
-#     Загружает изображения, прогоняет process_image и строит графики.
-#     rotate_test=True добавляет прогон на 0/90/180/270 и оценку устойчивости по IoU-сопоставлению.
-#     """
-
-#     global UPLOADED_IMAGES
-#     all_df = []
-#     inv_records = []  # пары (file, rot_k_input, ref_id, match_id, dR, dX, dY, dZ)
-
-#     for fn, img in UPLOADED_IMAGES.items():
-#         if img is None:
-#             print(f"{fn}: изображение пустое")
-#             continue
-
-#         H0, W0 = img.shape[:2]
-
-#         vis0, rows0 = process_image(img)
-#         df0 = _rows_to_df(rows0, fn)
-#         df0["input_rot_k"] = 0
-#         if "pose_src" not in df0.columns:
-#             df0["pose_src"] = "none"
-#         all_df.append(df0)
-
-#         if rotate_test:
-#             ref = df0.copy()
-#             ref["ref_idx"] = np.arange(len(ref))
-#             ref_boxes = ref["bbox"].tolist()
-
-#             for k_in in [1, 2, 3]:
-#                 imgk = _rotate_image_k90(img, k_in)
-#                 visk, rowsk = process_image(imgk)
-#                 dfk = _rows_to_df(rowsk, fn)
-#                 dfk["input_rot_k"] = k_in
-
-#                 if len(dfk) == 0:
-#                     all_df.append(dfk)
-#                     continue
-
-#                 mapped_boxes = []
-#                 for bb in dfk["bbox"].tolist():
-#                     mapped_boxes.append(_map_bbox_to_base(bb, W0, H0, k_in))
-#                 dfk["bbox_base"] = mapped_boxes
-
-#                 for j, rowk in dfk.iterrows():
-#                     bbk = rowk["bbox_base"]
-#                     best_iou = -1.0
-#                     best_i = None
-#                     for i, bbr in enumerate(ref_boxes):
-#                         iou = _iou_xyxy_int(bbk, bbr)
-#                         if iou > best_iou:
-#                             best_iou = iou
-#                             best_i = i
-#                     if best_i is None or best_iou < iou_match_thr:
-#                         continue
-
-#                     rr = ref.iloc[best_i]
-#                     dR = _ang_diff_deg(rowk.get("R-pos", None), rr.get("R-pos", None))
-#                     dX = _ang_diff_deg(rowk.get("X-pos", None), rr.get("X-pos", None))
-#                     dY = _ang_diff_deg(rowk.get("Y-pos", None), rr.get("Y-pos", None))
-#                     dZ = _ang_diff_deg(rowk.get("Z-pos", None), rr.get("Z-pos", None))
-
-#                     inv_records.append({
-#                         "file": fn,
-#                         "input_rot_deg": int(k_in * 90),
-#                         "match_iou": float(best_iou),
-#                         "dR": dR,
-#                         "dX": dX,
-#                         "dY": dY,
-#                         "dZ": dZ
-#                     })
-
-#                 all_df.append(dfk.drop(columns=["bbox_base"], errors="ignore"))
-
-#     if not all_df:
-#         print("Нет данных для построения графиков")
-#         return
-
-#     df = pd.concat(all_df, ignore_index=True)
-#     for col in ["X-pos", "Y-pos", "Z-pos", "R-pos", "conf", "bbox_min_side"]:
-#         if col in df.columns:
-#             df[col] = pd.to_numeric(df[col], errors="coerce")
-
-#     df["has_R"] = df["R-pos"].notna()
-#     df["has_XYZ"] = df["X-pos"].notna() & df["Y-pos"].notna() & df["Z-pos"].notna()
-
-#     # 1) Распределение R
-#     if "R-pos" in df.columns:
-#         _plot_hist(df["R-pos"], "Распределение угла R (ориентация в плоскости)", "R, градусы", bins=36)
-
-#     # 2) Распределения X/Y/Z
-#     if "X-pos" in df.columns:
-#         _plot_hist(df["X-pos"], "Распределение X (yaw)", "X, градусы", bins=36)
-#     if "Y-pos" in df.columns:
-#         _plot_hist(df["Y-pos"], "Распределение Y (pitch)", "Y, градусы", bins=36)
-#     if "Z-pos" in df.columns:
-#         _plot_hist(df["Z-pos"], "Распределение Z (roll)", "Z, градусы", bins=36)
-
-#     # 3) Доля валидных оценок по размеру bbox
-#     bins = [0, 6, 10, 15, 20, 30, 40, 60, 80, 120, 200, 400, 800, 2000]
-#     _plot_rate_by_bins(
-#         df, "bbox_min_side", "has_R", bins=bins,
-#         title="Доля объектов с вычисленным R по размеру bbox",
-#         xlabel="Бин минимальной стороны bbox (px), индекс бина",
-#         ylabel="Доля с R"
-#     )
-#     _plot_rate_by_bins(
-#         df, "bbox_min_side", "has_XYZ", bins=bins,
-#         title="Доля объектов с вычисленными X/Y/Z по размеру bbox",
-#         xlabel="Бин минимальной стороны bbox (px), индекс бина",
-#         ylabel="Доля с X/Y/Z"
-#     )
-
-#     # 4) Частоты источников позы
-#     if "pose_src" in df.columns:
-#         vc = df["pose_src"].fillna("none").value_counts()
-#         _plot_bar_counts(
-#             labels=vc.index.tolist(),
-#             counts=vc.values.tolist(),
-#             title="Распределение pose_src",
-#             xlabel="Источник геометрии",
-#             ylabel="Количество объектов"
-#         )
-
-#     # 5) Устойчивость к повороту входного изображения (если включено)
-#     if rotate_test and inv_records:
-#         inv = pd.DataFrame(inv_records)
-#         for c in ["dR", "dX", "dY", "dZ"]:
-#             inv[c] = pd.to_numeric(inv[c], errors="coerce")
-
-#         deltas_R = {0: [], 1: [], 2: [], 3: []}
-#         deltas_X = {0: [], 1: [], 2: [], 3: []}
-#         deltas_Y = {0: [], 1: [], 2: [], 3: []}
-#         deltas_Z = {0: [], 1: [], 2: [], 3: []}
-
-#         for deg in [90, 180, 270]:
-#             k = deg // 90
-#             sub = inv[inv["input_rot_deg"] == deg]
-#             deltas_R[k] = sub["dR"].dropna().astype(float).tolist()
-#             deltas_X[k] = sub["dX"].dropna().astype(float).tolist()
-#             deltas_Y[k] = sub["dY"].dropna().astype(float).tolist()
-#             deltas_Z[k] = sub["dZ"].dropna().astype(float).tolist()
-
-#         _plot_boxplot_by_rotation(deltas_R, "Устойчивость R при повороте входного изображения", "|ΔR|, градусы")
-#         _plot_boxplot_by_rotation(deltas_X, "Устойчивость X при повороте входного изображения", "|ΔX|, градусы")
-#         _plot_boxplot_by_rotation(deltas_Y, "Устойчивость Y при повороте входного изображения", "|ΔY|, градусы")
-#         _plot_boxplot_by_rotation(deltas_Z, "Устойчивость Z при повороте входного изображения", "|ΔZ|, градусы")
-
-#     print("Графики построены. Итоговый DataFrame df доступен в переменной df внутри функции.")
-
-# # Запуск построения графиков
-# evaluate_and_plot_graphs(iou_match_thr=0.3, rotate_test=True)
 
 def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
     """
@@ -2016,4 +1755,91 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
       "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
     }
     """
-    raise NotImplementedError("Замените телo run() на вызов вашей логики внутри этого файла и сбор результата в dict ModuleResult")
+    def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
+        global yolo, YOLO_DEVICE_ARG
+
+    t0 = time.time()
+    os.makedirs(out_dir, exist_ok=True)
+
+    warnings = []
+
+    nb = (cfg.get("notebooks", {}) or {}).get("rotation_detect", {}) or {}
+    model_path = str(nb.get("model_path", "yolo11n.pt"))
+
+    try:
+        if getattr(yolo, "_vk_model_path", None) != model_path:
+            yolo = YOLO(model_path)
+            yolo._vk_model_path = model_path
+    except Exception:
+        yolo = YOLO(model_path)
+        yolo._vk_model_path = model_path
+
+    YOLO_DEVICE_ARG = None
+    device_used = "cpu"
+    if (device_mode or "auto") != "cpu" and torch is not None:
+        try:
+            if torch.cuda.is_available():
+                gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
+                YOLO_DEVICE_ARG = str(gpu_id)
+                device_used = "gpu"
+        except Exception:
+            pass
+    if (device_mode or "auto") == "gpu" and device_used != "gpu":
+        warnings.append("gpu_requested_but_unavailable")
+
+    img = read_image_path(image_path)
+    if img is None:
+        raise RuntimeError("Не удалось прочитать изображение")
+
+    H, W = img.shape[:2]
+
+    vis, rows = process_image(img)
+    if vis is None:
+        vis = img.copy()
+        rows = []
+
+    annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_2.jpg"))
+    cv2.imwrite(annotated_path, vis)
+
+    dets = []
+    for r in (rows or []):
+        bb = r.get("bbox", None)
+        if not bb or len(bb) != 4:
+            continue
+
+        x1, y1, x2, y2 = map(int, bb)
+        conf = r.get("conf", 0.0)
+
+        meta = dict(r)
+        meta.pop("bbox", None)
+        meta.pop("id", None)
+        meta.pop("conf", None)
+
+        for k, v in list(meta.items()):
+            if isinstance(v, (np.integer,)):
+                meta[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                meta[k] = float(v)
+
+        dets.append({
+            "bbox_xyxy": [x1, y1, x2, y2],
+            "conf": float(conf) if conf is not None else 0.0,
+            "cls_id": 2,
+            "cls_name": "car",
+            "meta": meta
+        })
+
+    total_ms = int(round((time.time() - t0) * 1000))
+
+    return {
+        "module_id": "cluster_2",
+        "image_w": int(W),
+        "image_h": int(H),
+        "device_used": device_used,
+        "warnings": warnings,
+        "annotated_image_path": annotated_path,
+        "cleaned_image_path": "",
+        "artifacts": {},
+        "timings_ms": {"total": total_ms, "preprocess": 0, "inference": 0, "postprocess": 0},
+        "detections": dets
+    }

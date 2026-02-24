@@ -7,9 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1BQ1g78TtC53VY8bK3YucEmCPLyXdocuu
 """
 
-!pip -q install opencv-python-headless==4.10.0.84 ultralytics==8.3.39 pillow-heif matplotlib
-!pip -q install -U huggingface_hub
-
 
 import os
 import re
@@ -34,11 +31,23 @@ from huggingface_hub import hf_hub_download
 from pathlib import Path
 from PIL import Image as PILImage, ImageOps
 from ultralytics import YOLO
-from google.colab import drive, files
-from IPython.display import display, Image as IPImage
 
-pillow_heif.register_heif_opener()
-drive.mount("/content/drive", force_remount=True)
+try:
+    from google.colab import drive, files
+except Exception:
+    drive = None
+    files = None
+
+try:
+    from IPython.display import display, Image as IPImage
+except Exception:
+    display = None
+    IPImage = None
+
+try:
+    pillow_heif.register_heif_opener()
+except Exception:
+    pass
 
 def log(msg: str):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
@@ -304,18 +313,11 @@ def resolve_model_path() -> Path:
         log(f"auto-selected MODEL_PATH: {CFG['MODEL_PATH']}")
         return uniq[0]
 
-    print("Найдено несколько файлов *.pt. Выберите номер:")
-    for i, c in enumerate(uniq):
-        print(f"[{i}] {c}")
-    while True:
-        s = input("Введите номер: ").strip()
-        if s.isdigit():
-            i = int(s)
-            if 0 <= i < len(uniq):
-                CFG["MODEL_PATH"] = str(uniq[i])
-                log(f"selected MODEL_PATH: {CFG['MODEL_PATH']}")
-                return uniq[i]
-        print("Неверный номер.")
+    raise FileNotFoundError(
+        "Найдено несколько файлов весов *.pt. "
+        "Интерактивный выбор отключён. "
+        "Укажите точный путь в CFG['MODEL_PATH'] или передайте model_path через cfg в run()."
+    )
 
 
 def get_det_model():
@@ -414,8 +416,12 @@ def detect_tiled_fast(model, img_bgr,
 
 def detect_tiled(model, img_bgr, **kwargs):
     return detect_tiled_fast(model, img_bgr, **kwargs)
+if __name__ == "__main__":
+    init_data()
 
-init_data()
+
+
+
 
 dst_dir = Path("/content/drive/MyDrive/DRONE/data_det")
 dst_dir.mkdir(parents=True, exist_ok=True)
@@ -429,8 +435,12 @@ if not pt.exists():
 
 print("PT files in DRONE/data_det:", [p.name for p in dst_dir.glob("*.pt")])
 print("Selected:", pt, "exists=", pt.exists())
+if __name__ == "__main__":
+    init_data()
 
-init_data()
+
+
+
 
 det = get_det_model()
 keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
@@ -595,9 +605,15 @@ else:
         fp = det_run / name
         if fp.exists():
             display(IPImage(filename=str(fp)))
-
+if __name__ == "__main__":
+    init_data()
 # 5 - СВЕРХСКОРОСТЬ ДО 1 СЕКУНДЫ! ВОТ ТАКОЙ СКОРОСТИ НАДО ДЛЯ ОСТАЛЬНЫХ ПРОГРАММ ДОБИТЬСЯ! (потому что программа скорее всего работала на на GPU)
-init_data()
+
+
+
+
+
+
 det = get_det_model()
 keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
 
@@ -1324,8 +1340,13 @@ def find_cls_results_png(runs_root: str, run_name: str):
         print(p)
 
 find_cls_results_png(RUNS, CFG["CLS_RUN_NAME"])
+if __name__ == "__main__":
+    init_data()
 
-init_data()
+
+
+
+
 det = get_det_model()
 keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
 
@@ -1394,4 +1415,97 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
       "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
     }
     """
-    raise NotImplementedError("Замените телo run() на вызов вашей логики внутри этого файла и сбор результата в dict ModuleResult")
+    t0 = time.time()
+os.makedirs(out_dir, exist_ok=True)
+
+warnings = []
+
+nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
+
+model_path = str(nb.get("model_path", CFG.get("MODEL_PATH", "")))
+if not model_path:
+    raise FileNotFoundError("Не задан model_path: cfg['notebooks']['vehicle_detect']['model_path']")
+if not Path(model_path).exists():
+    raise FileNotFoundError(f"Файл весов не найден: {model_path}")
+
+CFG["MODEL_PATH"] = model_path
+CFG["DET_CONF"] = float(nb.get("conf", CFG.get("DET_CONF", 0.01)))
+CFG["DET_IOU"] = float(nb.get("iou", CFG.get("DET_IOU", 0.5)))
+CFG["DET_MAX_DET"] = int(nb.get("max_det", CFG.get("DET_MAX_DET", 300)))
+CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
+CFG["TILED_BATCH"] = int(nb.get("tiled_batch", CFG.get("TILED_BATCH", 16)))
+CFG["OVERLAP"] = float(nb.get("overlap", CFG.get("OVERLAP", 0.2)))
+
+tile_v = nb.get("tile", CFG.get("TILE", 640))
+CFG["TILE"] = int(tile_v) if str(tile_v).lower() != "auto" else "auto"
+CFG["AUTO_TILE_TARGET"] = int(nb.get("auto_tile_target", CFG.get("AUTO_TILE_TARGET", 640)))
+
+prefer_gpu = (device_mode or "auto") != "cpu"
+PRED_DEVICE = pick_device(prefer_gpu=prefer_gpu)
+device_used = "gpu" if PRED_DEVICE != "cpu" else "cpu"
+if (device_mode or "auto") == "gpu" and device_used != "gpu":
+    warnings.append("gpu_requested_but_unavailable")
+
+resolve_tile_and_sizes(image_path)
+
+global _DET_MODEL
+_DET_MODEL = None  # чтобы точно подхватил новый MODEL_PATH
+det = get_det_model()
+keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
+
+img = read_image_path(image_path)
+H, W = img.shape[:2]
+
+t_inf0 = time.time()
+boxes = detect_tiled(
+    det, img,
+    conf=float(CFG["DET_CONF"]),
+    iou=float(CFG["DET_IOU"]),
+    imgsz=int(TILED_IMGSZ),
+    max_det=int(CFG["DET_MAX_DET"]),
+    nms_thr=float(CFG["DET_NMS_THR"]),
+    tile=int(TILE),
+    overlap=float(OVERLAP),
+    batch=int(CFG["TILED_BATCH"]),
+    keep_ids=keep_ids
+)
+t_inf1 = time.time()
+
+vis = img.copy()
+dets = []
+for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
+    x1 = max(0, min(int(x1), W - 1))
+    x2 = max(0, min(int(x2), W - 1))
+    y1 = max(0, min(int(y1), H - 1))
+    y2 = max(0, min(int(y2), H - 1))
+    if x2 <= x1 or y2 <= y1:
+        continue
+    cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    cv2.putText(vis, f"#{i} {float(c):.2f}", (x1, max(0, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+    dets.append({
+        "bbox_xyxy": [int(x1), int(y1), int(x2), int(y2)],
+        "conf": float(c),
+        "cls_id": 0,
+        "cls_name": "vehicle",
+        "meta": {}
+    })
+
+annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_1.jpg"))
+cv2.imwrite(annotated_path, vis)
+
+total_ms = int(round((time.time() - t0) * 1000))
+inf_ms = int(round((t_inf1 - t_inf0) * 1000))
+
+return {
+    "module_id": "cluster_1",
+    "image_w": int(W),
+    "image_h": int(H),
+    "device_used": device_used,
+    "warnings": warnings,
+    "annotated_image_path": annotated_path,
+    "cleaned_image_path": "",
+    "artifacts": {"model_path": str(model_path), "count": int(len(dets))},
+    "timings_ms": {"total": total_ms, "preprocess": 0, "inference": inf_ms, "postprocess": max(0, total_ms - inf_ms)},
+    "detections": dets
+}

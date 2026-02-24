@@ -7,22 +7,20 @@ Original file is located at
     https://colab.research.google.com/drive/1NNtUeYrHLXFjEL9aU-lFrAL7JCp4beEQ
 """
 
-# Пока не всю машину распознает, а надо всю!
-
-# ГОТОВ К ПЕРЕНОСУ
-
-# УСТАНОВКА
-
-# Применение: если использовать кластерность, то можно, например, обнаружить расположение двигателя, бака и так далее!
-
-!pip -q install ultralytics==8.3.39 opencv-python-headless pillow matplotlib
-
 import numpy as np
 import cv2
 from PIL import Image
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
-from google.colab import files
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
+
+try:
+    from google.colab import files
+except Exception:
+    files = None
 
 # классы машин COCO: car, motorcycle, bus, truck
 CAR_CLASSES = {2, 3, 5, 7}
@@ -53,9 +51,16 @@ SHRINK_FRAC = 0
 
 # Поджатие финального бокса, чтобы убрать лишние пустоты
 model = YOLO("yolo11n.pt")
+def load_image_from_path(image_path: str):
+    img = Image.open(image_path).convert("RGB")
+    img_np = np.array(img)
+    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    return image_path, img_bgr
 
 
 def load_image_from_upload():
+    if files is None:
+        raise RuntimeError("files.upload() доступен только в Google Colab. Используйте load_image_from_path().")
     uploaded = files.upload()
     fname = next(iter(uploaded.keys()))
     img = Image.open(fname).convert("RGB")
@@ -593,22 +598,160 @@ def process_image():
     return
 
 # ЗАПУСК
-process_image()
+if __name__ == "__main__":
+    process_image()
 
 def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
-    """
-    Должна вернуть dict в формате ModuleResult:
-    {
-      "module_id": "...",
-      "image_w": int,
-      "image_h": int,
-      "device_used": "gpu|cpu",
-      "warnings": [..],
-      "annotated_image_path": "...",
-      "cleaned_image_path": "...",
-      "artifacts": {...},
-      "timings_ms": {...},
-      "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
+    global model
+    global TILE_SIZE, OVERLAP, CONF_THRES, IOU_THR
+    global AREA_FRAC_BIG, LARGEST_FORCE_REFINEMENT
+    global ROI_SCALE, ROI_MIN_SIZE
+    global CAND_IOU_MIN, CENTER_SCALE_X, CENTER_SCALE_Y
+    global SHRINK_FRAC
+
+    t0 = time.time()
+    os.makedirs(out_dir, exist_ok=True)
+
+    warnings = []
+
+    nb = (cfg.get("notebooks", {}) or {}).get("claster_detect", {}) or {}
+
+    if "tile_size" in nb: TILE_SIZE = int(nb["tile_size"])
+    if "overlap" in nb: OVERLAP = float(nb["overlap"])
+    if "conf" in nb: CONF_THRES = float(nb["conf"])
+    if "iou_thr" in nb: IOU_THR = float(nb["iou_thr"])
+
+    if "area_frac_big" in nb: AREA_FRAC_BIG = float(nb["area_frac_big"])
+    if "largest_force_refinement" in nb: LARGEST_FORCE_REFINEMENT = bool(nb["largest_force_refinement"])
+
+    if "roi_scale" in nb: ROI_SCALE = float(nb["roi_scale"])
+    if "roi_min_size" in nb: ROI_MIN_SIZE = int(nb["roi_min_size"])
+
+    if "cand_iou_min" in nb: CAND_IOU_MIN = float(nb["cand_iou_min"])
+    if "center_scale_x" in nb: CENTER_SCALE_X = float(nb["center_scale_x"])
+    if "center_scale_y" in nb: CENTER_SCALE_Y = float(nb["center_scale_y"])
+
+    if "shrink_frac" in nb: SHRINK_FRAC = float(nb["shrink_frac"])
+
+    model_path = str(nb.get("model_path", "yolo11n.pt"))
+
+    try:
+        if getattr(model, "_vk_model_path", None) != model_path:
+            model = YOLO(model_path)
+            model._vk_model_path = model_path
+    except Exception:
+        model = YOLO(model_path)
+        model._vk_model_path = model_path
+
+    device_used = "cpu"
+    if (device_mode or "auto") != "cpu" and torch is not None:
+        try:
+            if torch.cuda.is_available():
+                gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
+                model.to(f"cuda:{gpu_id}")
+                device_used = "gpu"
+        except Exception:
+            pass
+    if (device_mode or "auto") == "gpu" and device_used != "gpu":
+        warnings.append("gpu_requested_but_unavailable")
+
+    fname, img = load_image_from_path(image_path)
+    H, W = img.shape[:2]
+
+    full_boxes = detect_cars_full(img, conf_thres=CONF_THRES)
+
+    if not full_boxes:
+        tiled_boxes = detect_cars_on_tiles_whole(img)
+        final_boxes = tiled_boxes
+        clustered_indices = set()
+    else:
+        if W <= TILE_SIZE and H <= TILE_SIZE:
+            final_boxes = full_boxes
+            clustered_indices = set()
+        else:
+            final_boxes = []
+            clustered_indices = set()
+
+            largest_idx = -1
+            largest_area = -1.0
+            for idx, b in enumerate(full_boxes):
+                x1, y1, x2, y2, conf, cls_id = b
+                a = float(max(0.0, x2 - x1) * max(0.0, y2 - y1))
+                if a > largest_area:
+                    largest_area = a
+                    largest_idx = idx
+
+            frame_area = float(W * H) if W > 0 and H > 0 else 1.0
+
+            for idx, b in enumerate(full_boxes):
+                x1, y1, x2, y2, conf, cls_id = b
+                bw = float(x2 - x1)
+                bh = float(y2 - y1)
+
+                area_frac = float(max(0.0, bw) * max(0.0, bh)) / frame_area
+
+                need_cluster = (bw > float(TILE_SIZE) or bh > float(TILE_SIZE))
+                if area_frac >= float(AREA_FRAC_BIG):
+                    need_cluster = True
+                if LARGEST_FORCE_REFINEMENT and idx == largest_idx:
+                    need_cluster = True
+
+                if need_cluster:
+                    nx1, ny1, nx2, ny2 = refine_car_with_tiles_whole(img, [x1, y1, x2, y2])
+                    final_boxes.append([nx1, ny1, nx2, ny2, conf, cls_id])
+                    clustered_indices.add(idx + 1)
+                else:
+                    final_boxes.append(b)
+
+    cls_map = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+
+    dets = []
+    vis = img.copy()
+
+    for idx, b in enumerate(final_boxes, start=1):
+        x1, y1, x2, y2, conf, cls_id = b
+
+        x1 = int(max(0, min(W - 1, int(round(x1)))))
+        y1 = int(max(0, min(H - 1, int(round(y1)))))
+        x2 = int(max(0, min(W - 1, int(round(x2)))))
+        y2 = int(max(0, min(H - 1, int(round(y2)))))
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        refined = (idx in clustered_indices)
+
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
+        label = f"#{idx}{'T' if refined else ''}"
+        cv2.putText(vis, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(vis, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
+
+        dets.append({
+            "bbox_xyxy": [x1, y1, x2, y2],
+            "conf": float(conf),
+            "cls_id": int(cls_id),
+            "cls_name": cls_map.get(int(cls_id), str(int(cls_id))),
+            "meta": {"refined": bool(refined)}
+        })
+
+    annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_3.jpg"))
+    cv2.imwrite(annotated_path, vis)
+
+    total_ms = int(round((time.time() - t0) * 1000))
+
+    return {
+        "module_id": "cluster_3",
+        "image_w": int(W),
+        "image_h": int(H),
+        "device_used": device_used,
+        "warnings": warnings,
+        "annotated_image_path": annotated_path,
+        "cleaned_image_path": "",
+        "artifacts": {
+            "input_filename": os.path.basename(fname),
+            "clustered_indices": sorted(list(clustered_indices)),
+            "counts": {"full": int(len(full_boxes) if full_boxes else 0), "final": int(len(dets))}
+        },
+        "timings_ms": {"total": total_ms, "preprocess": 0, "inference": 0, "postprocess": 0},
+        "detections": dets
     }
-    """
-    raise NotImplementedError("Замените телo run() на вызов вашей логики внутри этого файла и сбор результата в dict ModuleResult")

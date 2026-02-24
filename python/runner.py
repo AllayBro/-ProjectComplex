@@ -20,8 +20,8 @@ def write_json(path: str, obj: Dict[str, Any]) -> None:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="runner.py")
     ap.add_argument("--task", required=True, choices=["cluster", "distance_full"])
     ap.add_argument("--cluster-id", type=int, default=0)
     ap.add_argument("--input", required=True)
@@ -29,6 +29,25 @@ def main() -> None:
     ap.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"])
     ap.add_argument("--config", required=True)
     ap.add_argument("--result-json", required=True)
+    return ap
+
+
+def main() -> int:
+    ap = build_parser()
+
+    # Если запустили без аргументов — печатаем help и выходим БЕЗ ошибки
+    if len(sys.argv) == 1:
+        ap.print_help()
+        print("Этот скрипт запускается из Qt-приложения vk_qt_app.exe")
+        print("Если необходимо запустить из runner.py, то нужно выполнить следующую команду: ")
+        print("python runner.py --task cluster --cluster-id 1 --input ПУТЬ_К_КАРТИНКЕ --output-dir ПУТЬ_К_out --device auto --config ПУТЬ_К_default_config.json --config --result-json ПУТЬ_К_result.json")
+        return 0
+
+    # Если запустили help — печатаем help и выходим
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        ap.print_help()
+        return 0
+
     args = ap.parse_args()
 
     cfg = read_json(args.config)
@@ -58,12 +77,14 @@ def main() -> None:
 
         write_json(args.result_json, res)
         print("OK")
+        return 0
+
     except SystemExit:
         raise
     except Exception:
         traceback.print_exc()
-        raise
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
