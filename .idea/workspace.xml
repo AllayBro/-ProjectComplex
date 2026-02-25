@@ -28,7 +28,7 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="24.02 - v0.2 - Fix Bug clusters, reload CMake and rebuilding runner" />
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="25.02 - v0.3" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -64,6 +64,7 @@
   <component name="HighlightingSettingsPerFile">
     <setting file="file://$PROJECT_DIR$/src/AppConfig.cpp" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/AppConfig.h" root0="FORCE_HIGHLIGHTING" />
+    <setting file="mock://C:/Users/AllayBro/Desktop/ProjectComplex/src/ClustersTab.cpp" root0="SKIP_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/ClustersTab.cpp" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/ClustersTab.h" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/FullDistanceTab.cpp" root0="FORCE_HIGHLIGHTING" />
@@ -109,6 +110,7 @@
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.readMode.enableVisualFormatting&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.west.config.association.type.startup.service&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
     &quot;cf.first.check.clang-format&quot;: &quot;false&quot;,
     &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
@@ -118,7 +120,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.language&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;works.szabope.plugins.mypy.configurable.MypyConfigurable&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -127,19 +129,14 @@
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\python\notebooks" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex" />
+      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\external\QXlsx" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\cmake-build-debug\yolo" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\python\notebooks" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\python\full_distance" />
-      <recent name="C:\Users\AllayBro\Desktop\ВКР\ProjectComplex" />
-      <recent name="C:\Users\AllayBro\Desktop\ВКР\ProjectComplex\cmake-build-debug" />
     </key>
   </component>
   <component name="RunManager">
-    <configuration default="true" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
     <configuration name="vk_qt_app" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="vk_qt_app" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="vk_qt_app">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -169,7 +166,15 @@
       <workItem from="1771784880172" duration="12315000" />
       <workItem from="1771923679334" duration="2099000" />
       <workItem from="1771927277782" duration="154000" />
-      <workItem from="1771927447791" duration="10595000" />
+      <workItem from="1771927447791" duration="14140000" />
+      <workItem from="1771948035575" duration="28000" />
+      <workItem from="1771948119245" duration="107000" />
+      <workItem from="1771948299611" duration="76000" />
+      <workItem from="1771948428812" duration="4493000" />
+      <workItem from="1772001547119" duration="8463000" />
+      <workItem from="1772038125500" duration="329000" />
+      <workItem from="1772038737392" duration="333000" />
+      <workItem from="1772044212787" duration="18000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -235,7 +240,23 @@
       <option name="project" value="LOCAL" />
       <updated>1771939944857</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="24.02 - v0.2 - Fix Bug clusters, reload CMake and rebuilding runner">
+      <option name="closed" value="true" />
+      <created>1771943393678</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1771943393678</updated>
+    </task>
+    <task id="LOCAL-00010" summary="25.02 - v0.3">
+      <option name="closed" value="true" />
+      <created>1772010649054</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1772010649054</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -261,7 +282,23 @@
     <MESSAGE value="add Project" />
     <MESSAGE value="23.02 - v0.1" />
     <MESSAGE value="24.02 - v0.2 - Fix Bug clusters, reload CMake and rebuilding runner" />
-    <option name="LAST_COMMIT_MESSAGE" value="24.02 - v0.2 - Fix Bug clusters, reload CMake and rebuilding runner" />
+    <MESSAGE value="25.02 - v0.3" />
+    <option name="LAST_COMMIT_MESSAGE" value="25.02 - v0.3" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/ClustersTab.cpp</url>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/python/notebooks/claster_detect.py</url>
+          <line>8</line>
+          <option name="timeStamp" value="2" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />

@@ -5,9 +5,11 @@
 #include <QComboBox>
 #include <QVector>
 
-#include "RunnerClient.h"
-#include "ResultView.h"
 #include "AppConfig.h"
+
+class RunnerClient;
+class ResultView;
+struct ModuleResult;
 
 class ClustersTab : public QWidget {
     Q_OBJECT

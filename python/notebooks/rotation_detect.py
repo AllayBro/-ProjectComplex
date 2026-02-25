@@ -11,6 +11,13 @@ Original file is located at
 import math, json, os, time
 import numpy as np
 import cv2
+import os
+import time
+
+try:
+    import torch
+except Exception:
+    torch = None
 
 try:
     import pandas as pd

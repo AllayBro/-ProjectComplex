@@ -1,15 +1,18 @@
 #pragma once
 #include <QObject>
 #include <QProcess>
-#include <QJsonObject>
-#include "ModelTypes.h"
+#include <QString>
+#include <QStringList>
+
 #include "AppConfig.h"
+
+struct ModuleResult;
 
 class RunnerClient : public QObject {
     Q_OBJECT
 public:
     explicit RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent = nullptr);
-
+    void appendLog(const QString& s);
     void runCluster(int clusterId,
                     const QString& imagePath,
                     const QString& outputDir,
@@ -29,6 +32,7 @@ private slots:
     void onReadyStdout();
     void onReadyStderr();
     void onFinished(int exitCode, QProcess::ExitStatus status);
+    void onError(QProcess::ProcessError err);
 
 private:
     AppConfig m_cfg;
@@ -40,4 +44,9 @@ private:
     void startProcess(const QStringList& args);
     static bool loadResultJson(const QString& path, ModuleResult& out, QString& err);
     static QString absPath(const QString& appDir, const QString& relOrAbs);
+
+    static bool writeDetectionsCsv(const QString& outDir,
+                                  ModuleResult& r,
+                                  QString& csvPath,
+                                  QString& err);
 };

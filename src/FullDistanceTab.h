@@ -4,9 +4,10 @@
 #include <QPushButton>
 #include <QComboBox>
 
-#include "RunnerClient.h"
-#include "ResultView.h"
 #include "AppConfig.h"
+
+class RunnerClient;
+class ResultView;
 
 class FullDistanceTab : public QWidget {
     Q_OBJECT
@@ -23,8 +24,8 @@ private:
     QPushButton* m_browseOut = nullptr;
 
     QComboBox* m_device = nullptr;
-
     QPushButton* m_run = nullptr;
+
     ResultView* m_view = nullptr;
 
     void bindRunner();

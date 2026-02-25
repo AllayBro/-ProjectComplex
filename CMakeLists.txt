@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql)
 
 add_executable(vk_qt_app
         src/main.cpp
@@ -22,7 +22,7 @@ add_executable(vk_qt_app
         src/FullDistanceTab.h src/FullDistanceTab.cpp
 )
 
-target_link_libraries(vk_qt_app PRIVATE Qt6::Widgets)
+target_link_libraries(vk_qt_app PRIVATE Qt6::Widgets Qt6::Sql)
 
 if (WIN32)
     # Берём префикс Qt из пути к Qt6::Widgets (у вас это .../lib/libQt6Widgets.a)

@@ -9,11 +9,16 @@ Original file is located at
 
 #определяет смазанность машины или объекта вокруг нее?
 
-!pip -q install ultralytics==8.3.39 opencv-python-headless pillow matplotlib
-
 
 import numpy as np
 import cv2
+import os
+import time
+
+try:
+    import torch
+except Exception:
+    torch = None
 from PIL import Image
 from PIL.ExifTags import TAGS
 import matplotlib.pyplot as plt

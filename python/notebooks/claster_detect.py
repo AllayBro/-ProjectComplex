@@ -7,8 +7,16 @@ Original file is located at
     https://colab.research.google.com/drive/1NNtUeYrHLXFjEL9aU-lFrAL7JCp4beEQ
 """
 
+import os
+import time
+
+try:
+    import torch
+except Exception:
+    torch = None
 import numpy as np
 import cv2
+from pathlib import Path
 from PIL import Image
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
@@ -50,7 +58,8 @@ SHRINK_FRAC = 0
 
 
 # Поджатие финального бокса, чтобы убрать лишние пустоты
-model = YOLO("yolo11n.pt")
+YOLO_DIR = Path(__file__).resolve().parents[3] / "yolo"
+model = YOLO(str(YOLO_DIR / "yolo11n.pt"))
 def load_image_from_path(image_path: str):
     img = Image.open(image_path).convert("RGB")
     img_np = np.array(img)

@@ -1,0 +1,4 @@
+# YOLO weights
+yolo/*.pt
+*.pt
+*.pt
