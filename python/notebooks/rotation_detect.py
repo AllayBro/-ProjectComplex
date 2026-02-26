@@ -1743,7 +1743,8 @@ def run_pipeline():
 
         print(json.dumps(rows, ensure_ascii=False, indent=2))
 
-run_pipeline()
+if __name__ == "__main__":
+    run_pipeline()
 
 
 def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:

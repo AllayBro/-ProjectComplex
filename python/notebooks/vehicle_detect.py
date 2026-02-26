@@ -25,9 +25,17 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import pillow_heif
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except Exception:
+    pillow_heif = None
 
-from huggingface_hub import hf_hub_download
+try:
+    from huggingface_hub import hf_hub_download
+except Exception:
+    hf_hub_download = None
+
 from pathlib import Path
 from PIL import Image as PILImage, ImageOps
 from ultralytics import YOLO
@@ -44,10 +52,6 @@ except Exception:
     display = None
     IPImage = None
 
-try:
-    pillow_heif.register_heif_opener()
-except Exception:
-    pass
 
 def log(msg: str):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
@@ -99,18 +103,59 @@ CLS_DEVICE  = pick_device(prefer_gpu=True)
 log(f"PRED_DEVICE={PRED_DEVICE}, CLS_DEVICE={CLS_DEVICE}")
 
 
+                                        # yolo11x-visdrone.pt")
+                                        # yolo11s-visdrone.pt")
 HF_URL = "https://huggingface.co/erbayat/yolov11x-visdrone/resolve/main/yolo11x-visdrone.pt"
-# HF_DST = Path("/content/hf_weights/yolo11x-visdrone.pt")
-# HF_DST = Path("/content/hf_weights/yolo11s-visdrone.pt")
-HF_DST = Path("/content/hf_weights/yolo11n-visdrone.pt")
-HF_DST.parent.mkdir(parents=True, exist_ok=True)
 
-if not HF_DST.exists():
-    os.system(f'wget -q -O "{HF_DST}" "{HF_URL}"')
+def _hf_default_cache_dir() -> Path:
+    # Кроссплатформенный кэш: Windows/Linux
+    base = os.environ.get("VK_HF_CACHE_DIR", "")
+    if base.strip():
+        return Path(base).expanduser()
+    return Path.home() / ".cache" / "vk_qt_app" / "hf_weights"
 
-CFG["MODEL_PATH"] = str(HF_DST)
-log(f"MODEL_PATH from HF: {CFG['MODEL_PATH']}")
+def ensure_hf_weight(hf_url: str, prefer_path: str | None = None) -> str:
+    if prefer_path:
+        p0 = Path(os.path.expandvars(os.path.expanduser(str(prefer_path)))).resolve()
+        if p0.exists():
+            return str(p0)
 
+    cache_dir = _hf_default_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = os.path.basename(hf_url.split("?")[0]).strip()
+    if not filename.lower().endswith(".pt"):
+        filename = "model.pt"
+
+    dst = (cache_dir / filename).resolve()
+    if dst.exists() and dst.stat().st_size > 0:
+        return str(dst)
+
+    # 1) huggingface_hub, если доступен
+    if hf_hub_download is not None:
+        # Вариант через repo_id/filename (предпочтительно)
+        try:
+            # для данного URL:
+            repo_id = "erbayat/yolov11x-visdrone"
+            fname = "yolo11x-visdrone.pt"
+            p = hf_hub_download(repo_id=repo_id, filename=fname)
+            p = Path(p).resolve()
+            if p.exists():
+                return str(p)
+        except Exception:
+            pass
+
+    # 2) Fallback: стандартный urllib (прямой URL)
+    import urllib.request
+    try:
+        urllib.request.urlretrieve(hf_url, str(dst))
+    except Exception as e:
+        raise RuntimeError(f"Не удалось скачать веса по HF_URL: {hf_url}. Ошибка: {e!r}")
+
+    if not dst.exists() or dst.stat().st_size <= 0:
+        raise RuntimeError(f"Скачивание завершилось, но файл пустой: {dst}")
+
+    return str(dst)
 
 
 def _round32(x: int) -> int:
@@ -430,200 +475,976 @@ repo_id = "erbayat/yolov11x-visdrone"
 filename = "yolo11x-visdrone.pt"
 
 pt = dst_dir / filename
-if not pt.exists():
-    hf_hub_download(repo_id=repo_id, filename=filename, local_dir=str(dst_dir))
+
+if pt.exists():
+    MODEL_PATH = str(pt)
+else:
+    MODEL_PATH = str(CFG.get("MODEL_PATH", ""))
 
 print("PT files in DRONE/data_det:", [p.name for p in dst_dir.glob("*.pt")])
-print("Selected:", pt, "exists=", pt.exists())
+print("Selected:", MODEL_PATH, "exists=", Path(MODEL_PATH).exists() if MODEL_PATH else False)
+
+
 if __name__ == "__main__":
-    init_data()
+    det = get_det_model()
+    keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
+
+    log(f"model.names = {det.names}")
+    log(f"KEEP_CLASS_IDS = {keep_ids}")
+
+    reset_dir(DET_ROOT)
+    ensure_det_dirs(DET_ROOT)
+
+    def xyxy_to_yolo_line(x1, y1, x2, y2, tile_size: int):
+        w = x2 - x1
+        h = y2 - y1
+        xc = x1 + w / 2
+        yc = y1 + h / 2
+        return f"0 {xc/tile_size:.6f} {yc/tile_size:.6f} {w/tile_size:.6f} {h/tile_size:.6f}"
+
+    def clip_to_tile(gx1, gy1, gx2, gy2, tx, ty, tile_size: int):
+        x1 = max(gx1, tx)
+        y1 = max(gy1, ty)
+        x2 = min(gx2, tx + tile_size)
+        y2 = min(gy2, ty + tile_size)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return (x1 - tx, y1 - ty, x2 - tx, y2 - ty)
+
+    def crop_tile_center(img, cx, cy, tile_size: int):
+        H, W = img.shape[:2]
+        x1 = int(cx - tile_size / 2)
+        y1 = int(cy - tile_size / 2)
+        x2 = x1 + tile_size
+        y2 = y1 + tile_size
+
+        if x1 < 0:
+            x2 -= x1
+            x1 = 0
+        if y1 < 0:
+            y2 -= y1
+            y1 = 0
+        if x2 > W:
+            x1 -= (x2 - W)
+            x2 = W
+        if y2 > H:
+            y1 -= (y2 - H)
+            y2 = H
+
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        if (x2 - x1) != tile_size or (y2 - y1) != tile_size:
+            return None
+        return x1, y1, x2, y2
+
+    def export_det_list(det_model, paths, out_root: Path, split: str):
+        img_out = out_root / split / "images"
+        lab_out = out_root / split / "labels"
+        img_out.mkdir(parents=True, exist_ok=True)
+        lab_out.mkdir(parents=True, exist_ok=True)
+
+        max_crops = CFG["MAX_CROPS_PER_IMAGE"]
+        t_all = time.perf_counter()
+
+        for idx, ip in enumerate(paths, 1):
+            t0 = time.perf_counter()
+            img = read_image_path(ip)
+
+            boxes = predict_boxes(
+                det_model, img,
+                conf=float(CFG["DET_CONF"]),
+                iou=float(CFG["DET_IOU"]),
+                imgsz=int(BASE_IMGSZ),
+                max_det=int(CFG["DET_MAX_DET"]),
+                keep_ids=keep_ids
+            )
+
+            boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
+            boxes = filter_boxes_geom(boxes, cfg=None)
+
+            cand = []
+            for (x1, y1, x2, y2, c) in boxes:
+                cx = (x1 + x2) / 2
+                cy = (y1 + y2) / 2
+                cand.append((c, cx, cy))
+            cand.sort(reverse=True, key=lambda t: t[0])
+            if isinstance(max_crops, int):
+                cand = cand[:max_crops]
+
+            saved = 0
+            for k, (c, cx, cy) in enumerate(cand):
+                tile_rect = crop_tile_center(img, cx, cy, int(TILE))
+                if tile_rect is None:
+                    continue
+
+                tx1, ty1, tx2, ty2 = tile_rect
+                tile_img = img[ty1:ty2, tx1:tx2]
+
+                lines = []
+                for (x1, y1, x2, y2, _) in boxes:
+                    cb = clip_to_tile(x1, y1, x2, y2, tx1, ty1, int(TILE))
+                    if cb is None:
+                        continue
+                    x1t, y1t, x2t, y2t = cb
+                    if (x2t - x1t) < 2 or (y2t - y1t) < 2:
+                        continue
+                    lines.append(xyxy_to_yolo_line(x1t, y1t, x2t, y2t, int(TILE)))
+
+                if not lines:
+                    continue
+
+                stem = f"{Path(ip).stem}_c{k}_x{tx1}_y{ty1}"
+                cv2.imwrite(str(img_out / f"{stem}.jpg"), tile_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                (lab_out / f"{stem}.txt").write_text("\n".join(lines), encoding="utf-8")
+                saved += 1
+
+            dt = time.perf_counter() - t0
+            avg = (time.perf_counter() - t_all) / idx
+            eta = avg * (len(paths) - idx)
+            log(f"det_export {split}: {idx}/{len(paths)} saved={saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
+
+    export_det_list(det, train_imgs, DET_ROOT, "train")
+    export_det_list(det, val_imgs,   DET_ROOT, "val")
+
+    (Path(DET_ROOT) / "data.yaml").write_text(
+    f"""path: {DET_ROOT}
+    train: train/images
+    val: val/images
+    names: ["car"]
+    """,
+    encoding="utf-8"
+    )
+
+    log(f"DET tiles train={len(list((DET_ROOT/'train/images').glob('*.jpg')))} "
+        f"val={len(list((DET_ROOT/'val/images').glob('*.jpg')))}")
+
+    # 3
+    from pathlib import Path
+    from ultralytics import YOLO
+    from IPython.display import Image as IPImage, display  # <-- важно: не конфликтует с PIL.Image
+
+    MODEL_PATH = "/content/drive/MyDrive/DRONE/data_det/yolo11x-visdrone.pt"
+    assert Path(MODEL_PATH).exists(), f"Не найден вес: {MODEL_PATH}"
+
+    # Режим: используем готовый вес, обучение НЕ запускаем
+    SKIP_TRAINING = True
+
+    def build_det_model_auto(*args, **kwargs):
+        # совместимость с вашим кодом: кто вызывает build_det_model_auto — получит модель
+        return YOLO(MODEL_PATH)
+
+    # det_run бывает только после train(); в режиме без обучения его нет
+    det_run = None
+
+    if det_run is None:
+        print("DET: обучение пропущено — графиков нет (используется готовый вес).")
+    else:
+        p = det_run / "results.png"
+        if p.exists():
+            display(IPImage(filename=str(p)))
+        else:
+            print("DET: results.png не найден")
+
+        for name in ["confusion_matrix.png", "PR_curve.png", "P_curve.png", "R_curve.png", "F1_curve.png"]:
+            fp = det_run / name
+            if fp.exists():
+                display(IPImage(filename=str(fp)))
+    if __name__ == "__main__":
+        init_data()
+    # 5 - СВЕРХСКОРОСТЬ ДО 1 СЕКУНДЫ! ВОТ ТАКОЙ СКОРОСТИ НАДО ДЛЯ ОСТАЛЬНЫХ ПРОГРАММ ДОБИТЬСЯ! (потому что программа скорее всего работала на на GPU)
 
 
 
 
 
-det = get_det_model()
-keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
 
-log(f"model.names = {det.names}")
-log(f"KEEP_CLASS_IDS = {keep_ids}")
+    det = get_det_model()
+    keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
 
-reset_dir(DET_ROOT)
-ensure_det_dirs(DET_ROOT)
+    up = files.upload()
 
-def xyxy_to_yolo_line(x1, y1, x2, y2, tile_size: int):
-    w = x2 - x1
-    h = y2 - y1
-    xc = x1 + w / 2
-    yc = y1 + h / 2
-    return f"0 {xc/tile_size:.6f} {yc/tile_size:.6f} {w/tile_size:.6f} {h/tile_size:.6f}"
+    for fn, data in up.items():
+        img = read_image_auto(data)
 
-def clip_to_tile(gx1, gy1, gx2, gy2, tx, ty, tile_size: int):
-    x1 = max(gx1, tx)
-    y1 = max(gy1, ty)
-    x2 = min(gx2, tx + tile_size)
-    y2 = min(gy2, ty + tile_size)
-    if x2 <= x1 or y2 <= y1:
-        return None
-    return (x1 - tx, y1 - ty, x2 - tx, y2 - ty)
-
-def crop_tile_center(img, cx, cy, tile_size: int):
-    H, W = img.shape[:2]
-    x1 = int(cx - tile_size / 2)
-    y1 = int(cy - tile_size / 2)
-    x2 = x1 + tile_size
-    y2 = y1 + tile_size
-
-    if x1 < 0:
-        x2 -= x1
-        x1 = 0
-    if y1 < 0:
-        y2 -= y1
-        y1 = 0
-    if x2 > W:
-        x1 -= (x2 - W)
-        x2 = W
-    if y2 > H:
-        y1 -= (y2 - H)
-        y2 = H
-
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    if (x2 - x1) != tile_size or (y2 - y1) != tile_size:
-        return None
-    return x1, y1, x2, y2
-
-def export_det_list(det_model, paths, out_root: Path, split: str):
-    img_out = out_root / split / "images"
-    lab_out = out_root / split / "labels"
-    img_out.mkdir(parents=True, exist_ok=True)
-    lab_out.mkdir(parents=True, exist_ok=True)
-
-    max_crops = CFG["MAX_CROPS_PER_IMAGE"]
-    t_all = time.perf_counter()
-
-    for idx, ip in enumerate(paths, 1):
-        t0 = time.perf_counter()
-        img = read_image_path(ip)
-
-        boxes = predict_boxes(
-            det_model, img,
+        boxes = detect_tiled(
+            det, img,
             conf=float(CFG["DET_CONF"]),
             iou=float(CFG["DET_IOU"]),
-            imgsz=int(BASE_IMGSZ),
+            imgsz=int(TILED_IMGSZ),
             max_det=int(CFG["DET_MAX_DET"]),
+            nms_thr=float(CFG["DET_NMS_THR"]),
+            tile=int(TILE),
+            overlap=float(OVERLAP),
+            batch=int(CFG["TILED_BATCH"]),
             keep_ids=keep_ids
         )
 
-        boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
-        boxes = filter_boxes_geom(boxes, cfg=None)
+        vis = img.copy()
+        rows = []
+        for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(vis, f"#{i} {c:.2f}", (x1, max(0, y1-6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+            rows.append({"id": i, "bbox": [x1, y1, x2, y2], "conf": round(float(c), 3)})
 
-        cand = []
-        for (x1, y1, x2, y2, c) in boxes:
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            cand.append((c, cx, cy))
-        cand.sort(reverse=True, key=lambda t: t[0])
-        if isinstance(max_crops, int):
-            cand = cand[:max_crops]
+        plt.figure(figsize=(80, 48))
+        plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
+        plt.axis("off")
+        plt.show()
 
-        saved = 0
-        for k, (c, cx, cy) in enumerate(cand):
-            tile_rect = crop_tile_center(img, cx, cy, int(TILE))
-            if tile_rect is None:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+
+    # 6
+    from pathlib import Path
+
+    det_run = Path(RUNS) / "det_car_tiled"
+
+    def explain_det_results(det_run: Path):
+        print("Проверка каталога:", det_run)
+
+        if not det_run.exists():
+            print("Каталог det_car_tiled не существует.")
+            print("Причина: обучение детектора не запускалось или использован другой project/name.")
+            return
+
+        files = list(det_run.iterdir())
+        if not files:
+            print("Каталог существует, но пуст.")
+            print("Причина: обучение не стартовало или завершилось до записи результатов.")
+            return
+
+        has_results = (det_run / "results.png").exists()
+        has_weights = (det_run / "weights").exists()
+        has_train_logs = any(f.name.startswith("events.out.tfevents") for f in files)
+
+        if not has_results:
+            print("Файл results.png отсутствует.")
+
+            if not has_weights:
+                print("Причина: команда yolo detect train не выполнялась.")
+                return
+
+            if has_weights and not has_train_logs:
+                print("Причина: обучение было прервано до первой эпохи.")
+                return
+
+            if has_weights and has_train_logs:
+                print("Причина: обучение завершилось, но графики не были сохранены.")
+                print("Возможные условия:")
+                print("- обучение шло с very small epochs")
+                print("- training был в другом каталоге runs")
+                print("- версия Ultralytics не сохранила results.png")
+                return
+
+        print("results.png найден.")
+
+        curves = [
+            "confusion_matrix.png",
+            "PR_curve.png",
+            "P_curve.png",
+            "R_curve.png",
+            "F1_curve.png"
+        ]
+
+        any_curve = False
+        for name in curves:
+            if (det_run / name).exists():
+                any_curve = True
+
+        if not any_curve:
+            print("Графики PR/Recall/F1 отсутствуют.")
+            print("Причина: Ultralytics не строил дополнительные кривые для данного запуска.")
+        else:
+            print("Дополнительные графики присутствуют.")
+
+    explain_det_results(det_run)
+
+    def sync_artifacts_to_drive(overwrite_runs: bool = True,
+                                overwrite_det: bool = False,
+                                overwrite_cls: bool = False,
+                                make_backup: bool = True):
+        src_runs = RUNS
+        src_det  = DET_ROOT
+        src_cls  = CLS_ROOT
+
+        dst_runs = DRONE / "runs"
+        dst_det  = DRONE / "artifacts_data_det"
+        dst_cls  = DRONE / "artifacts_data_cls"
+
+        pairs = [
+            ("runs", src_runs, dst_runs, overwrite_runs),
+            ("det",  src_det,  dst_det,  overwrite_det),
+            ("cls",  src_cls,  dst_cls,  overwrite_cls),
+        ]
+
+        for tag, src, dst, ow in pairs:
+            if not src.exists():
+                log(f"Пропуск: источника нет: {src}")
                 continue
 
-            tx1, ty1, tx2, ty2 = tile_rect
-            tile_img = img[ty1:ty2, tx1:tx2]
-
-            lines = []
-            for (x1, y1, x2, y2, _) in boxes:
-                cb = clip_to_tile(x1, y1, x2, y2, tx1, ty1, int(TILE))
-                if cb is None:
-                    continue
-                x1t, y1t, x2t, y2t = cb
-                if (x2t - x1t) < 2 or (y2t - y1t) < 2:
-                    continue
-                lines.append(xyxy_to_yolo_line(x1t, y1t, x2t, y2t, int(TILE)))
-
-            if not lines:
+            if dst.exists() and not ow:
+                log(f"Пропуск: назначение уже есть: {dst}")
                 continue
 
-            stem = f"{Path(ip).stem}_c{k}_x{tx1}_y{ty1}"
-            cv2.imwrite(str(img_out / f"{stem}.jpg"), tile_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-            (lab_out / f"{stem}.txt").write_text("\n".join(lines), encoding="utf-8")
-            saved += 1
+            if dst.exists() and ow:
+                if make_backup:
+                    _backup_dir(dst)
+                else:
+                    shutil.rmtree(dst)
 
-        dt = time.perf_counter() - t0
-        avg = (time.perf_counter() - t_all) / idx
-        eta = avg * (len(paths) - idx)
-        log(f"det_export {split}: {idx}/{len(paths)} saved={saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
+            log(f"sync start [{tag}]: {src} -> {dst}")
+            shutil.copytree(src, dst)
+            log(f"sync done  [{tag}]: {src} -> {dst}")
+    print("ok")
 
-export_det_list(det, train_imgs, DET_ROOT, "train")
-export_det_list(det, val_imgs,   DET_ROOT, "val")
+    # 8
+    def ensure_cls_dirs(root):
+        for p in ["train/car","train/bg","val/car","val/bg"]:
+            Path(root, p).mkdir(parents=True, exist_ok=True)
 
-(Path(DET_ROOT) / "data.yaml").write_text(
-f"""path: {DET_ROOT}
-train: train/images
-val: val/images
-names: ["car"]
-""",
-encoding="utf-8"
-)
+    def crop_with_pad(img, x1, y1, x2, y2, pad=0.8):
+        H, W = img.shape[:2]
+        w = x2 - x1
+        h = y2 - y1
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        nw = w * (1 + pad)
+        nh = h * (1 + pad)
 
-log(f"DET tiles train={len(list((DET_ROOT/'train/images').glob('*.jpg')))} "
-    f"val={len(list((DET_ROOT/'val/images').glob('*.jpg')))}")
+        rx1 = int(max(0, cx - nw / 2))
+        ry1 = int(max(0, cy - nh / 2))
+        rx2 = int(min(W, cx + nw / 2))
+        ry2 = int(min(H, cy + nh / 2))
 
-# 3
-from pathlib import Path
-from ultralytics import YOLO
-from IPython.display import Image as IPImage, display  # <-- важно: не конфликтует с PIL.Image
+        if rx2 <= rx1 or ry2 <= ry1:
+            return None
+        return img[ry1:ry2, rx1:rx2]
 
-MODEL_PATH = "/content/drive/MyDrive/DRONE/data_det/yolo11x-visdrone.pt"
-assert Path(MODEL_PATH).exists(), f"Не найден вес: {MODEL_PATH}"
+    # 10
+    log(f"train_imgs={len(train_imgs)} val_imgs={len(val_imgs)}")
 
-# Режим: используем готовый вес, обучение НЕ запускаем
-SKIP_TRAINING = True
-
-def build_det_model_auto(*args, **kwargs):
-    # совместимость с вашим кодом: кто вызывает build_det_model_auto — получит модель
-    return YOLO(MODEL_PATH)
-
-# det_run бывает только после train(); в режиме без обучения его нет
-det_run = None
-
-if det_run is None:
-    print("DET: обучение пропущено — графиков нет (используется готовый вес).")
-else:
-    p = det_run / "results.png"
-    if p.exists():
-        display(IPImage(filename=str(p)))
+    if len(train_imgs) == 0:
+        log("train sample: EMPTY")
     else:
-        print("DET: results.png не найден")
+        log(f"train sample: {train_imgs[0]}")
 
-    for name in ["confusion_matrix.png", "PR_curve.png", "P_curve.png", "R_curve.png", "F1_curve.png"]:
-        fp = det_run / name
-        if fp.exists():
-            display(IPImage(filename=str(fp)))
-if __name__ == "__main__":
-    init_data()
-# 5 - СВЕРХСКОРОСТЬ ДО 1 СЕКУНДЫ! ВОТ ТАКОЙ СКОРОСТИ НАДО ДЛЯ ОСТАЛЬНЫХ ПРОГРАММ ДОБИТЬСЯ! (потому что программа скорее всего работала на на GPU)
+    if len(val_imgs) == 0:
+        log("val   sample: EMPTY")
+    else:
+        log(f"val   sample: {val_imgs[0]}")
 
+    def export_cls_list(det_model, paths, out_root: Path, split: str,
+                        pos_conf=0.25, max_pos=None, max_bg=None):
+        out_car = Path(out_root, split, "car")
+        out_bg  = Path(out_root, split, "bg")
+        out_car.mkdir(parents=True, exist_ok=True)
+        out_bg.mkdir(parents=True, exist_ok=True)
 
+        BG_SIZE = 320
+        STEP = 320
+        BG_IOU_THR = 0.05
 
+        keep_ids = get_keep_class_ids(det_model, CFG["KEEP_CLASS_NAMES"])
+        t_all = time.perf_counter()
 
+        for idx, ip in enumerate(paths, 1):
+            t0 = time.perf_counter()
+            img = read_image_path(ip)
 
+            boxes = predict_boxes(
+                det_model, img,
+                conf=float(CFG["DET_CONF"]),
+                iou=float(CFG["DET_IOU"]),
+                imgsz=int(BASE_IMGSZ),
+                max_det=int(CFG["DET_MAX_DET"]),
+                keep_ids=keep_ids
+            )
 
-det = get_det_model()
-keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
+            boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
+            boxes = filter_boxes_geom(boxes, cfg=None)
 
-up = files.upload()
+            pos = [(x1, y1, x2, y2, c) for (x1, y1, x2, y2, c) in boxes if c >= pos_conf]
+            pos.sort(key=lambda b: b[4], reverse=True)
+            if isinstance(max_pos, int):
+                pos = pos[:max_pos]
 
-for fn, data in up.items():
-    img = read_image_auto(data)
+            pos_xyxy = [(x1, y1, x2, y2) for (x1, y1, x2, y2, _) in pos]
+            stem = Path(ip).stem
+
+            for k, (x1, y1, x2, y2, c) in enumerate(pos):
+                cr = crop_with_pad(img, x1, y1, x2, y2, pad=0.8)
+                if cr is not None and cr.size != 0:
+                    cv2.imwrite(str(out_car / f"{stem}_p{k}_{c:.2f}.jpg"),
+                                cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+            H, W = img.shape[:2]
+            bg_saved = 0
+            y = 0
+            while y + BG_SIZE <= H:
+                x = 0
+                while x + BG_SIZE <= W:
+                    if isinstance(max_bg, int) and bg_saved >= max_bg:
+                        break
+                    rect = (x, y, x + BG_SIZE, y + BG_SIZE)
+
+                    ok = True
+                    for pb in pos_xyxy:
+                        if iou_xyxy(rect, pb) > BG_IOU_THR:
+                            ok = False
+                            break
+
+                    if ok:
+                        cr = img[y:y+BG_SIZE, x:x+BG_SIZE]
+                        if cr is not None and cr.size != 0:
+                            cv2.imwrite(str(out_bg / f"{stem}_bg{bg_saved}.jpg"),
+                                        cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                            bg_saved += 1
+
+                    x += STEP
+                if isinstance(max_bg, int) and bg_saved >= max_bg:
+                    break
+                y += STEP
+
+            dt = time.perf_counter() - t0
+            avg = (time.perf_counter() - t_all) / idx
+            eta = avg * (len(paths) - idx)
+            log(f"cls_export {split}: {idx}/{len(paths)} pos={len(pos)} bg={bg_saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
+
+    ensure_cls_dirs(CLS_ROOT)
+    export_cls_list(det, train_imgs, CLS_ROOT, "train")
+    export_cls_list(det, val_imgs,   CLS_ROOT, "val")
+
+    car_train = len(list(Path(CLS_ROOT, "train/car").glob("*.jpg")))
+    bg_train  = len(list(Path(CLS_ROOT, "train/bg").glob("*.jpg")))
+    car_val   = len(list(Path(CLS_ROOT, "val/car").glob("*.jpg")))
+    bg_val    = len(list(Path(CLS_ROOT, "val/bg").glob("*.jpg")))
+
+    log(f"CLS counts train car/bg: {car_train} / {bg_train}")
+    log(f"CLS counts val   car/bg: {car_val} / {bg_val}")
+
+    def _run(cmd):
+        return subprocess.check_output(cmd, shell=True, text=True)
+
+    print(_run("nvidia-smi -L || true"))
+    smi = _run("nvidia-smi || true")
+    print(smi)
+
+    m = re.search(r"CUDA Version:\s*([0-9]+)\.([0-9]+)", smi)
+    if m:
+        cuda_major = int(m.group(1))
+        cuda_minor = int(m.group(2))
+        cuda_tag = f"cu{cuda_major}{cuda_minor}"
+        print("CUDA tag for PyTorch wheels:", cuda_tag)
+    else:
+        print("GPU не найден — продолжайте на CPU.")
+
+    CLS_DEVICE = 0 if torch.cuda.is_available() else "cpu" #заменить обучение CPU на быстрое
+
+    # !yolo classify train \
+    #   model=yolov8n-cls.pt \
+    #   data={CLS_ROOT} \
+    #   imgsz=128 \
+    #   epochs=50 \
+    #   batch=64 \
+    #   patience=6 \
+    #   project={RUNS} \
+    #   name={CFG["CLS_RUN_NAME"]} \
+    #   device={CLS_DEVICE}
+
+    run_name = CFG["CLS_RUN_NAME"]
+
+    run_dir = Path(RUNS) / run_name
+    if not run_dir.exists():
+        run_dir = Path(RUNS) / "classify" / run_name
+
+    weights_dir = run_dir / "weights"
+    best_pt = weights_dir / "best.pt"
+    last_pt = weights_dir / "last.pt"
+
+    log(f"run_dir: {run_dir}")
+    log(f"best exists: {best_pt.exists()}  -> {best_pt}")
+    log(f"last exists: {last_pt.exists()}  -> {last_pt}")
+
+    if best_pt.exists():
+        ver = YOLO(str(best_pt))
+    elif last_pt.exists():
+        ver = YOLO(str(last_pt))
+    else:
+        raise RuntimeError(f"weights не найдены. Проверь, что train завершился и папка существует: {weights_dir}")
+
+    log("ver loaded")
+
+    def _resolve_cls_run_dir(runs_root: str, name: str) -> Path:
+        runs = Path(runs_root)
+        cand = [runs / name, runs / "classify" / name]
+        for d in cand:
+            if d.exists():
+                return d
+        best_list = list(runs.glob(f"**/{name}/weights/best.pt"))
+        if best_list:
+            return best_list[0].parents[1]
+        raise FileNotFoundError(f"Не найдена папка запуска классификатора '{name}' внутри {runs}")
+
+    def _list_images(dir_path: Path):
+        exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+        return sorted([p for p in dir_path.rglob("*") if p.is_file() and p.suffix.lower() in exts])
+
+    def _plot_line(df: pd.DataFrame, xcol: str, ycols: list, title: str, out_png: Path):
+        plt.figure(figsize=(10, 6))
+        plotted = 0
+        for c in ycols:
+            if c in df.columns:
+                plt.plot(df[xcol].values, df[c].values, label=c)
+                plotted += 1
+        plt.title(title)
+        plt.xlabel(xcol)
+        plt.grid(True)
+        if plotted > 1:
+            plt.legend()
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=150)
+        plt.show()
+
+    def _plot_confusion(cm: np.ndarray, class_names: list, title: str, out_png: Path, normalize_rows: bool):
+        cm2 = cm.astype(float).copy()
+        if normalize_rows:
+            row_sum = cm2.sum(axis=1, keepdims=True)
+            row_sum[row_sum == 0] = 1.0
+            cm2 = cm2 / row_sum
+
+        plt.figure(figsize=(8, 7))
+        plt.imshow(cm2, interpolation="nearest")
+        plt.title(title)
+        plt.xlabel("Pred")
+        plt.ylabel("True")
+        plt.xticks(range(len(class_names)), class_names, rotation=45, ha="right")
+        plt.yticks(range(len(class_names)), class_names)
+
+        for i in range(cm2.shape[0]):
+            for j in range(cm2.shape[1]):
+                val = cm2[i, j]
+                txt = f"{val:.2f}" if normalize_rows else str(int(val))
+                plt.text(j, i, txt, ha="center", va="center")
+
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=150)
+        plt.show()
+
+    def _binary_pr_curve(y_true: np.ndarray, y_score: np.ndarray):
+        order = np.argsort(-y_score)
+        y_true = y_true[order]
+
+        tp = np.cumsum(y_true == 1)
+        fp = np.cumsum(y_true == 0)
+        denom = tp + fp
+        denom[denom == 0] = 1
+        precision = tp / denom
+
+        total_pos = np.sum(y_true == 1)
+        recall = tp / total_pos if total_pos > 0 else np.zeros_like(tp, dtype=float)
+        return recall, precision
+
+    def _binary_roc_curve(y_true: np.ndarray, y_score: np.ndarray):
+        order = np.argsort(-y_score)
+        y_true = y_true[order]
+
+        P = np.sum(y_true == 1)
+        N = np.sum(y_true == 0)
+        if P == 0 or N == 0:
+            return np.array([0.0, 1.0]), np.array([0.0, 1.0])
+
+        tp = np.cumsum(y_true == 1)
+        fp = np.cumsum(y_true == 0)
+        tpr = tp / P
+        fpr = fp / N
+        return fpr, tpr
+
+    def _plot_pr_roc_if_binary(y_true_idx: np.ndarray, prob_mat: np.ndarray, pos_class: int, out_dir: Path):
+        n = prob_mat.shape[1]
+        if n != 2:
+            print("PR/ROC пропущены: классов не 2, а", n)
+            return
+
+        present = np.unique(y_true_idx)
+        if len(present) < 2:
+            print("PR/ROC пропущены: в выбранной выборке присутствует только один класс:", present.tolist())
+            return
+
+        y_true = (y_true_idx == pos_class).astype(int)
+        if np.sum(y_true == 1) == 0 or np.sum(y_true == 0) == 0:
+            print("PR/ROC пропущены: после выбора pos_class один из классов отсутствует.")
+            return
+
+        y_score = prob_mat[:, pos_class].astype(float)
+        recall, precision = _binary_pr_curve(y_true, y_score)
+        fpr, tpr = _binary_roc_curve(y_true, y_score)
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(recall, precision)
+        plt.title("PR-кривая (binary)")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(out_dir / "pr_curve_custom.png", dpi=150)
+        plt.show()
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr)
+        plt.title("ROC-кривая (binary)")
+        plt.xlabel("FPR")
+        plt.ylabel("TPR")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(out_dir / "roc_curve_custom.png", dpi=150)
+        plt.show()
+
+        plt.figure(figsize=(8, 6))
+        plt.hist(y_score[y_true == 1], bins=30, alpha=0.7, label="pos (true=1)")
+        plt.hist(y_score[y_true == 0], bins=30, alpha=0.7, label="neg (true=0)")
+        plt.title("Распределение score(pos)")
+        plt.xlabel("score(pos)")
+        plt.ylabel("count")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out_dir / "score_hist_pos.png", dpi=150)
+        plt.show()
+
+    def _plot_confidence_graphs(top1_conf: np.ndarray, top2_conf: np.ndarray, y_true: np.ndarray, class_names: list, out_dir: Path):
+        margin = top1_conf - top2_conf
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(top1_conf, bins=40)
+        plt.title("Распределение top1 confidence")
+        plt.xlabel("top1_conf")
+        plt.ylabel("count")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(out_dir / "top1_conf_hist.png", dpi=150)
+        plt.show()
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(margin, bins=40)
+        plt.title("Распределение запаса уверенности (top1 - top2)")
+        plt.xlabel("top1-top2")
+        plt.ylabel("count")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(out_dir / "margin_top1_top2_hist.png", dpi=150)
+        plt.show()
+
+        plt.figure(figsize=(10, 6))
+        for ci in sorted(set(int(x) for x in np.unique(y_true))):
+            mask = (y_true == ci)
+            plt.hist(top1_conf[mask], bins=40, alpha=0.6, label=f"true={class_names[ci]}")
+        plt.title("top1 confidence по истинному классу")
+        plt.xlabel("top1_conf")
+        plt.ylabel("count")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out_dir / "top1_conf_by_true_class.png", dpi=150)
+        plt.show()
+
+    def _plot_class_balance(cls_root: str, class_names: list, out_dir: Path):
+        root = Path(cls_root)
+        tr = root / "train"
+        va = root / "val"
+
+        train_counts = []
+        val_counts = []
+        for c in class_names:
+            train_counts.append(len(_list_images(tr / c)) if (tr / c).exists() else 0)
+            val_counts.append(len(_list_images(va / c)) if (va / c).exists() else 0)
+
+        x = np.arange(len(class_names))
+        width = 0.4
+        plt.figure(figsize=(10, 6))
+        plt.bar(x - width/2, train_counts, width, label="train")
+        plt.bar(x + width/2, val_counts, width, label="val")
+        plt.title("Баланс классов (кол-во изображений)")
+        plt.xticks(x, class_names, rotation=45, ha="right")
+        plt.grid(True, axis="y")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out_dir / "class_balance.png", dpi=150)
+        plt.show()
+
+    def _eval_on_val(ver, cls_root: str, imgsz: int, device, limit: int, seed: int = 0):
+        val_root = Path(cls_root) / "val"
+        if not val_root.exists():
+            raise FileNotFoundError(f"Не найден CLS_ROOT/val: {val_root}")
+
+        names_map = ver.names
+        if isinstance(names_map, dict):
+            idxs = sorted(names_map.keys())
+            class_names = [names_map[i] for i in idxs]
+        else:
+            class_names = list(names_map)
+
+        name_to_idx = {n: i for i, n in enumerate(class_names)}
+
+        per_class = {}
+        for cname in class_names:
+            d = val_root / cname
+            imgs = _list_images(d) if d.exists() else []
+            if imgs:
+                per_class[name_to_idx[cname]] = imgs
+
+        if not per_class:
+            raise RuntimeError("В CLS_ROOT/val нет изображений в папках классов, соответствующих ver.names")
+
+        rng = np.random.default_rng(seed)
+
+        items = []
+        if limit and limit > 0:
+            n_cls = len(per_class)
+            target = max(1, limit // n_cls)
+            for ci, imgs in per_class.items():
+                k = min(target, len(imgs))
+                pick = rng.choice(len(imgs), size=k, replace=False)
+                for j in pick:
+                    items.append((imgs[j], ci))
+            rng.shuffle(items)
+        else:
+            for ci, imgs in per_class.items():
+                for p in imgs:
+                    items.append((p, ci))
+            rng.shuffle(items)
+
+        y_true = np.array([ci for _, ci in items], dtype=int)
+
+        prob_list = []
+        y_pred = np.zeros(len(items), dtype=int)
+        top1_conf = np.zeros(len(items), dtype=float)
+        top2_conf = np.zeros(len(items), dtype=float)
+
+        t0 = time.perf_counter()
+        for i, (p, _) in enumerate(items):
+            r = ver.predict(source=str(p), imgsz=imgsz, device=device, verbose=False)[0]
+            probs = r.probs.data.detach().cpu().numpy().astype(float)
+            prob_list.append(probs)
+
+            order = np.argsort(-probs)
+            y_pred[i] = int(order[0])
+            top1_conf[i] = float(probs[order[0]])
+            top2_conf[i] = float(probs[order[1]]) if len(order) > 1 else 0.0
+
+        t_all = time.perf_counter() - t0
+        prob_mat = np.stack(prob_list, axis=0)
+        ms_per_img = (t_all / len(items)) * 1000.0
+
+        return items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img
+
+    def _metrics_table(cm: np.ndarray, class_names: list):
+        rows = []
+        total = cm.sum()
+        acc = float(np.trace(cm) / total) if total > 0 else 0.0
+
+        for i, name in enumerate(class_names):
+            tp = float(cm[i, i])
+            fp = float(cm[:, i].sum() - tp)
+            fn = float(cm[i, :].sum() - tp)
+
+            prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
+            supp = float(cm[i, :].sum())
+
+            rows.append({"class": name, "precision": prec, "recall": rec, "f1": f1, "support": int(supp)})
+
+        df = pd.DataFrame(rows)
+        macro = {
+            "class": "macro_avg",
+            "precision": float(df["precision"].mean()) if len(df) else 0.0,
+            "recall": float(df["recall"].mean()) if len(df) else 0.0,
+            "f1": float(df["f1"].mean()) if len(df) else 0.0,
+            "support": int(total),
+        }
+        df = pd.concat([df, pd.DataFrame([macro])], ignore_index=True)
+        return acc, df
+
+    def _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir: Path, max_show: int = 24):
+        bad = np.where(y_true != y_pred)[0]
+        if bad.size == 0:
+            print("Ошибок классификации на выбранной выборке нет.")
+            return
+
+        bad = bad[:min(max_show, bad.size)]
+        cols = 6
+        rows = int(np.ceil(len(bad) / cols))
+
+        plt.figure(figsize=(18, 3 * rows))
+        for k, idx in enumerate(bad, 1):
+            p, _ = items[idx]
+            img = PILImage.open(p).convert("RGB")
+            plt.subplot(rows, cols, k)
+            plt.imshow(img)
+            plt.axis("off")
+            t = class_names[int(y_true[idx])]
+            pr = class_names[int(y_pred[idx])]
+            plt.title(f"true={t} pred={pr} conf={top1_conf[idx]:.3f}")
+
+        plt.tight_layout()
+        plt.savefig(out_dir / "misclassified_grid.png", dpi=150)
+        plt.show()
+
+    def show_cls_lab_graphs(ver, RUNS: str, CLS_ROOT: str, name: str, imgsz: int = 128, eval_limit: int = 500):
+        run_dir = _resolve_cls_run_dir(RUNS, name)
+        out_dir = run_dir / "lab_graphs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        print("CLS run_dir:", run_dir)
+        print("CLS_ROOT:", CLS_ROOT)
+
+        names_map = ver.names
+        if isinstance(names_map, dict):
+            idxs = sorted(names_map.keys())
+            class_names = [names_map[i] for i in idxs]
+        else:
+            class_names = list(names_map)
+
+        csv_fp = run_dir / "results.csv"
+        if csv_fp.exists():
+            df = pd.read_csv(csv_fp)
+            xcol = "epoch" if "epoch" in df.columns else df.columns[0]
+            loss_cols = [c for c in df.columns if "loss" in c.lower()]
+            acc_cols = [c for c in df.columns if ("acc" in c.lower()) or ("accuracy" in c.lower())]
+
+            if loss_cols:
+                _plot_line(df, xcol, loss_cols, "CLS: loss по эпохам", out_dir / "train_loss_curves.png")
+            else:
+                print("В results.csv нет колонок loss:", list(df.columns))
+
+            if acc_cols:
+                _plot_line(df, xcol, acc_cols, "CLS: accuracy по эпохам", out_dir / "train_acc_curves.png")
+            else:
+                print("В results.csv нет колонок accuracy:", list(df.columns))
+        else:
+            print("results.csv не найден:", csv_fp)
+
+        _plot_class_balance(CLS_ROOT, class_names, out_dir)
+
+        items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img = _eval_on_val(
+            ver, CLS_ROOT, imgsz=imgsz, device=CLS_DEVICE, limit=eval_limit, seed=0
+        )
+
+        n_cls = len(class_names)
+        cm = np.zeros((n_cls, n_cls), dtype=int)
+        for t, p in zip(y_true, y_pred):
+            cm[t, p] += 1
+
+        _plot_confusion(cm, class_names, "Confusion matrix (counts)", out_dir / "confusion_counts.png", normalize_rows=False)
+        _plot_confusion(cm, class_names, "Confusion matrix (row-normalized)", out_dir / "confusion_norm.png", normalize_rows=True)
+
+        acc, tbl = _metrics_table(cm, class_names)
+        print("Accuracy:", acc)
+        display(tbl)
+
+        print("Среднее время инференса на val (мс/изображение):", round(ms_per_img, 2))
+
+        _plot_confidence_graphs(top1_conf, top2_conf, y_true, class_names, out_dir)
+
+        pos_class = 0
+        if "car" in class_names:
+            pos_class = int(class_names.index("car"))
+        _plot_pr_roc_if_binary(y_true, prob_mat, pos_class=pos_class, out_dir=out_dir)
+
+        _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir, max_show=24)
+
+        img_files = sorted([p for p in run_dir.glob("*.png")]) + sorted([p for p in run_dir.glob("*.jpg")])
+        if img_files:
+            print("Ultralytics-артефакты в run_dir:", len(img_files))
+            for p in img_files:
+                display(IPImage(filename=str(p)))
+        else:
+            print("В run_dir нет png/jpg артефактов Ultralytics.")
+
+    show_cls_lab_graphs(ver, RUNS, CLS_ROOT, "verifier_car_bg", imgsz=128, eval_limit=500)
+    def find_cls_results_png(runs_root: str, run_name: str):
+        """
+        Ищет results.png для указанного run_name в Ultralytics runs.
+        Возвращает:
+          - Path (если найдено)
+          - либо (None, first_hits, total_hits), где first_hits = первые 30 найденных путей results.png
+        """
+        runs = Path(runs_root)
+
+        cand = [
+            runs / run_name / "results.png",
+            runs / "classify" / run_name / "results.png",
+            runs / "detect" / run_name / "results.png",
+            runs / "segment" / run_name / "results.png",
+            runs / "pose" / run_name / "results.png",
+            ]
+        for p in cand:
+            if p.exists():
+                return p
+
+        hits = sorted(runs.glob("**/results.png"), key=lambda x: str(x))
+        return None, hits[:30], len(hits)
+
+def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
+    t0 = time.time()
+    os.makedirs(out_dir, exist_ok=True)
+
+    warnings = []
+
+    nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
+
+    model_path = str(nb.get("model_path", cfg.get("model_path", CFG.get("MODEL_PATH", ""))))
+    model_path = model_path.strip().strip('"').strip("'")
+    model_path = os.path.expandvars(os.path.expanduser(model_path))
+    if not model_path or not Path(model_path).exists():
+        # fallback: если путь не задан/не найден — берём веса с HF_URL в кэш
+        model_path = ensure_hf_weight(HF_URL, prefer_path=model_path)
+
+    if not model_path:
+        raise FileNotFoundError(
+            "Не задан model_path: cfg['notebooks']['vehicle_detect']['model_path']"
+        )
+
+    if not Path(model_path).exists():
+        raise FileNotFoundError(f"Файл весов не найден: {model_path}")
+
+    CFG["MODEL_PATH"] = model_path
+    CFG["DET_CONF"] = float(nb.get("conf", CFG.get("DET_CONF", 0.01)))
+    CFG["DET_IOU"] = float(nb.get("iou", CFG.get("DET_IOU", 0.5)))
+    CFG["DET_MAX_DET"] = int(nb.get("max_det", CFG.get("DET_MAX_DET", 300)))
+    CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
+    CFG["TILED_BATCH"] = int(nb.get("tiled_batch", CFG.get("TILED_BATCH", 16)))
+    CFG["OVERLAP"] = float(nb.get("overlap", CFG.get("OVERLAP", 0.2)))
+
+    tile_v = nb.get("tile", CFG.get("TILE", 640))
+    CFG["TILE"] = int(tile_v) if str(tile_v).lower() != "auto" else "auto"
+    CFG["AUTO_TILE_TARGET"] = int(
+        nb.get("auto_tile_target", CFG.get("AUTO_TILE_TARGET", 640))
+    )
+
+    prefer_gpu = (device_mode or "auto") != "cpu"
+    PRED_DEVICE = pick_device(prefer_gpu=prefer_gpu)
+    device_used = "gpu" if PRED_DEVICE != "cpu" else "cpu"
+
+    if (device_mode or "auto") == "gpu" and device_used != "gpu":
+        warnings.append("gpu_requested_but_unavailable")
+
+    resolve_tile_and_sizes(image_path)
+
+    global _DET_MODEL
+    _DET_MODEL = None
+
+    det = get_det_model()
+    keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
+
+    img = read_image_path(image_path)
+    H, W = img.shape[:2]
+
+    t_inf0 = time.time()
 
     boxes = detect_tiled(
-        det, img,
+        det,
+        img,
         conf=float(CFG["DET_CONF"]),
         iou=float(CFG["DET_IOU"]),
         imgsz=int(TILED_IMGSZ),
@@ -632,880 +1453,52 @@ for fn, data in up.items():
         tile=int(TILE),
         overlap=float(OVERLAP),
         batch=int(CFG["TILED_BATCH"]),
-        keep_ids=keep_ids
+        keep_ids=keep_ids,
     )
 
-    vis = img.copy()
-    rows = []
+    t_inf1 = time.time()
+
+    dets = []
+
     for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
-        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(vis, f"#{i} {c:.2f}", (x1, max(0, y1-6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-        rows.append({"id": i, "bbox": [x1, y1, x2, y2], "conf": round(float(c), 3)})
+        x1 = max(0, min(int(x1), W - 1))
+        x2 = max(0, min(int(x2), W - 1))
+        y1 = max(0, min(int(y1), H - 1))
+        y2 = max(0, min(int(y2), H - 1))
 
-    plt.figure(figsize=(80, 48))
-    plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-    plt.axis("off")
-    plt.show()
-
-    print(json.dumps(rows, ensure_ascii=False, indent=2))
-
-# 6
-from pathlib import Path
-
-det_run = Path(RUNS) / "det_car_tiled"
-
-def explain_det_results(det_run: Path):
-    print("Проверка каталога:", det_run)
-
-    if not det_run.exists():
-        print("Каталог det_car_tiled не существует.")
-        print("Причина: обучение детектора не запускалось или использован другой project/name.")
-        return
-
-    files = list(det_run.iterdir())
-    if not files:
-        print("Каталог существует, но пуст.")
-        print("Причина: обучение не стартовало или завершилось до записи результатов.")
-        return
-
-    has_results = (det_run / "results.png").exists()
-    has_weights = (det_run / "weights").exists()
-    has_train_logs = any(f.name.startswith("events.out.tfevents") for f in files)
-
-    if not has_results:
-        print("Файл results.png отсутствует.")
-
-        if not has_weights:
-            print("Причина: команда yolo detect train не выполнялась.")
-            return
-
-        if has_weights and not has_train_logs:
-            print("Причина: обучение было прервано до первой эпохи.")
-            return
-
-        if has_weights and has_train_logs:
-            print("Причина: обучение завершилось, но графики не были сохранены.")
-            print("Возможные условия:")
-            print("- обучение шло с very small epochs")
-            print("- training был в другом каталоге runs")
-            print("- версия Ultralytics не сохранила results.png")
-            return
-
-    print("results.png найден.")
-
-    curves = [
-        "confusion_matrix.png",
-        "PR_curve.png",
-        "P_curve.png",
-        "R_curve.png",
-        "F1_curve.png"
-    ]
-
-    any_curve = False
-    for name in curves:
-        if (det_run / name).exists():
-            any_curve = True
-
-    if not any_curve:
-        print("Графики PR/Recall/F1 отсутствуют.")
-        print("Причина: Ultralytics не строил дополнительные кривые для данного запуска.")
-    else:
-        print("Дополнительные графики присутствуют.")
-
-explain_det_results(det_run)
-
-def sync_artifacts_to_drive(overwrite_runs: bool = True,
-                            overwrite_det: bool = False,
-                            overwrite_cls: bool = False,
-                            make_backup: bool = True):
-    src_runs = RUNS
-    src_det  = DET_ROOT
-    src_cls  = CLS_ROOT
-
-    dst_runs = DRONE / "runs"
-    dst_det  = DRONE / "artifacts_data_det"
-    dst_cls  = DRONE / "artifacts_data_cls"
-
-    pairs = [
-        ("runs", src_runs, dst_runs, overwrite_runs),
-        ("det",  src_det,  dst_det,  overwrite_det),
-        ("cls",  src_cls,  dst_cls,  overwrite_cls),
-    ]
-
-    for tag, src, dst, ow in pairs:
-        if not src.exists():
-            log(f"Пропуск: источника нет: {src}")
+        if x2 <= x1 or y2 <= y1:
             continue
 
-        if dst.exists() and not ow:
-            log(f"Пропуск: назначение уже есть: {dst}")
-            continue
-
-        if dst.exists() and ow:
-            if make_backup:
-                _backup_dir(dst)
-            else:
-                shutil.rmtree(dst)
-
-        log(f"sync start [{tag}]: {src} -> {dst}")
-        shutil.copytree(src, dst)
-        log(f"sync done  [{tag}]: {src} -> {dst}")
-print("ok")
-
-# 8
-def ensure_cls_dirs(root):
-    for p in ["train/car","train/bg","val/car","val/bg"]:
-        Path(root, p).mkdir(parents=True, exist_ok=True)
-
-def crop_with_pad(img, x1, y1, x2, y2, pad=0.8):
-    H, W = img.shape[:2]
-    w = x2 - x1
-    h = y2 - y1
-    cx = (x1 + x2) / 2
-    cy = (y1 + y2) / 2
-    nw = w * (1 + pad)
-    nh = h * (1 + pad)
-
-    rx1 = int(max(0, cx - nw / 2))
-    ry1 = int(max(0, cy - nh / 2))
-    rx2 = int(min(W, cx + nw / 2))
-    ry2 = int(min(H, cy + nh / 2))
-
-    if rx2 <= rx1 or ry2 <= ry1:
-        return None
-    return img[ry1:ry2, rx1:rx2]
-
-# 10
-log(f"train_imgs={len(train_imgs)} val_imgs={len(val_imgs)}")
-
-if len(train_imgs) == 0:
-    log("train sample: EMPTY")
-else:
-    log(f"train sample: {train_imgs[0]}")
-
-if len(val_imgs) == 0:
-    log("val   sample: EMPTY")
-else:
-    log(f"val   sample: {val_imgs[0]}")
-
-def export_cls_list(det_model, paths, out_root: Path, split: str,
-                    pos_conf=0.25, max_pos=None, max_bg=None):
-    out_car = Path(out_root, split, "car")
-    out_bg  = Path(out_root, split, "bg")
-    out_car.mkdir(parents=True, exist_ok=True)
-    out_bg.mkdir(parents=True, exist_ok=True)
-
-    BG_SIZE = 320
-    STEP = 320
-    BG_IOU_THR = 0.05
-
-    keep_ids = get_keep_class_ids(det_model, CFG["KEEP_CLASS_NAMES"])
-    t_all = time.perf_counter()
-
-    for idx, ip in enumerate(paths, 1):
-        t0 = time.perf_counter()
-        img = read_image_path(ip)
-
-        boxes = predict_boxes(
-            det_model, img,
-            conf=float(CFG["DET_CONF"]),
-            iou=float(CFG["DET_IOU"]),
-            imgsz=int(BASE_IMGSZ),
-            max_det=int(CFG["DET_MAX_DET"]),
-            keep_ids=keep_ids
+        dets.append(
+            {
+                "bbox_xyxy": [x1, y1, x2, y2],
+                "conf": float(c),
+                "cls_id": 0,
+                "cls_name": "vehicle",
+                "meta": {},
+            }
         )
 
-        boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
-        boxes = filter_boxes_geom(boxes, cfg=None)
-
-        pos = [(x1, y1, x2, y2, c) for (x1, y1, x2, y2, c) in boxes if c >= pos_conf]
-        pos.sort(key=lambda b: b[4], reverse=True)
-        if isinstance(max_pos, int):
-            pos = pos[:max_pos]
-
-        pos_xyxy = [(x1, y1, x2, y2) for (x1, y1, x2, y2, _) in pos]
-        stem = Path(ip).stem
-
-        for k, (x1, y1, x2, y2, c) in enumerate(pos):
-            cr = crop_with_pad(img, x1, y1, x2, y2, pad=0.8)
-            if cr is not None and cr.size != 0:
-                cv2.imwrite(str(out_car / f"{stem}_p{k}_{c:.2f}.jpg"),
-                            cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-
-        H, W = img.shape[:2]
-        bg_saved = 0
-        y = 0
-        while y + BG_SIZE <= H:
-            x = 0
-            while x + BG_SIZE <= W:
-                if isinstance(max_bg, int) and bg_saved >= max_bg:
-                    break
-                rect = (x, y, x + BG_SIZE, y + BG_SIZE)
-
-                ok = True
-                for pb in pos_xyxy:
-                    if iou_xyxy(rect, pb) > BG_IOU_THR:
-                        ok = False
-                        break
-
-                if ok:
-                    cr = img[y:y+BG_SIZE, x:x+BG_SIZE]
-                    if cr is not None and cr.size != 0:
-                        cv2.imwrite(str(out_bg / f"{stem}_bg{bg_saved}.jpg"),
-                                    cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                        bg_saved += 1
-
-                x += STEP
-            if isinstance(max_bg, int) and bg_saved >= max_bg:
-                break
-            y += STEP
-
-        dt = time.perf_counter() - t0
-        avg = (time.perf_counter() - t_all) / idx
-        eta = avg * (len(paths) - idx)
-        log(f"cls_export {split}: {idx}/{len(paths)} pos={len(pos)} bg={bg_saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
-
-ensure_cls_dirs(CLS_ROOT)
-export_cls_list(det, train_imgs, CLS_ROOT, "train")
-export_cls_list(det, val_imgs,   CLS_ROOT, "val")
-
-car_train = len(list(Path(CLS_ROOT, "train/car").glob("*.jpg")))
-bg_train  = len(list(Path(CLS_ROOT, "train/bg").glob("*.jpg")))
-car_val   = len(list(Path(CLS_ROOT, "val/car").glob("*.jpg")))
-bg_val    = len(list(Path(CLS_ROOT, "val/bg").glob("*.jpg")))
-
-log(f"CLS counts train car/bg: {car_train} / {bg_train}")
-log(f"CLS counts val   car/bg: {car_val} / {bg_val}")
-
-def _run(cmd):
-    return subprocess.check_output(cmd, shell=True, text=True)
-
-print(_run("nvidia-smi -L || true"))
-smi = _run("nvidia-smi || true")
-print(smi)
-
-m = re.search(r"CUDA Version:\s*([0-9]+)\.([0-9]+)", smi)
-if m:
-    cuda_major = int(m.group(1))
-    cuda_minor = int(m.group(2))
-    cuda_tag = f"cu{cuda_major}{cuda_minor}"
-    print("CUDA tag for PyTorch wheels:", cuda_tag)
-else:
-    print("GPU не найден — продолжайте на CPU.")
-
-CLS_DEVICE = 0 if torch.cuda.is_available() else "cpu" #заменить обучение CPU на быстрое
-
-!yolo classify train \
-  model=yolov8n-cls.pt \
-  data={CLS_ROOT} \
-  imgsz=128 \
-  epochs=50 \
-  batch=64 \
-  patience=6 \
-  project={RUNS} \
-  name={CFG["CLS_RUN_NAME"]} \
-  device={CLS_DEVICE}
-
-run_name = CFG["CLS_RUN_NAME"]
-
-run_dir = Path(RUNS) / run_name
-if not run_dir.exists():
-    run_dir = Path(RUNS) / "classify" / run_name
-
-weights_dir = run_dir / "weights"
-best_pt = weights_dir / "best.pt"
-last_pt = weights_dir / "last.pt"
-
-log(f"run_dir: {run_dir}")
-log(f"best exists: {best_pt.exists()}  -> {best_pt}")
-log(f"last exists: {last_pt.exists()}  -> {last_pt}")
-
-if best_pt.exists():
-    ver = YOLO(str(best_pt))
-elif last_pt.exists():
-    ver = YOLO(str(last_pt))
-else:
-    raise RuntimeError(f"weights не найдены. Проверь, что train завершился и папка существует: {weights_dir}")
-
-log("ver loaded")
-
-def _resolve_cls_run_dir(runs_root: str, name: str) -> Path:
-    runs = Path(runs_root)
-    cand = [runs / name, runs / "classify" / name]
-    for d in cand:
-        if d.exists():
-            return d
-    best_list = list(runs.glob(f"**/{name}/weights/best.pt"))
-    if best_list:
-        return best_list[0].parents[1]
-    raise FileNotFoundError(f"Не найдена папка запуска классификатора '{name}' внутри {runs}")
-
-def _list_images(dir_path: Path):
-    exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-    return sorted([p for p in dir_path.rglob("*") if p.is_file() and p.suffix.lower() in exts])
-
-def _plot_line(df: pd.DataFrame, xcol: str, ycols: list, title: str, out_png: Path):
-    plt.figure(figsize=(10, 6))
-    plotted = 0
-    for c in ycols:
-        if c in df.columns:
-            plt.plot(df[xcol].values, df[c].values, label=c)
-            plotted += 1
-    plt.title(title)
-    plt.xlabel(xcol)
-    plt.grid(True)
-    if plotted > 1:
-        plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=150)
-    plt.show()
-
-def _plot_confusion(cm: np.ndarray, class_names: list, title: str, out_png: Path, normalize_rows: bool):
-    cm2 = cm.astype(float).copy()
-    if normalize_rows:
-        row_sum = cm2.sum(axis=1, keepdims=True)
-        row_sum[row_sum == 0] = 1.0
-        cm2 = cm2 / row_sum
-
-    plt.figure(figsize=(8, 7))
-    plt.imshow(cm2, interpolation="nearest")
-    plt.title(title)
-    plt.xlabel("Pred")
-    plt.ylabel("True")
-    plt.xticks(range(len(class_names)), class_names, rotation=45, ha="right")
-    plt.yticks(range(len(class_names)), class_names)
-
-    for i in range(cm2.shape[0]):
-        for j in range(cm2.shape[1]):
-            val = cm2[i, j]
-            txt = f"{val:.2f}" if normalize_rows else str(int(val))
-            plt.text(j, i, txt, ha="center", va="center")
-
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=150)
-    plt.show()
-
-def _binary_pr_curve(y_true: np.ndarray, y_score: np.ndarray):
-    order = np.argsort(-y_score)
-    y_true = y_true[order]
-
-    tp = np.cumsum(y_true == 1)
-    fp = np.cumsum(y_true == 0)
-    denom = tp + fp
-    denom[denom == 0] = 1
-    precision = tp / denom
-
-    total_pos = np.sum(y_true == 1)
-    recall = tp / total_pos if total_pos > 0 else np.zeros_like(tp, dtype=float)
-    return recall, precision
-
-def _binary_roc_curve(y_true: np.ndarray, y_score: np.ndarray):
-    order = np.argsort(-y_score)
-    y_true = y_true[order]
-
-    P = np.sum(y_true == 1)
-    N = np.sum(y_true == 0)
-    if P == 0 or N == 0:
-        return np.array([0.0, 1.0]), np.array([0.0, 1.0])
-
-    tp = np.cumsum(y_true == 1)
-    fp = np.cumsum(y_true == 0)
-    tpr = tp / P
-    fpr = fp / N
-    return fpr, tpr
-
-def _plot_pr_roc_if_binary(y_true_idx: np.ndarray, prob_mat: np.ndarray, pos_class: int, out_dir: Path):
-    n = prob_mat.shape[1]
-    if n != 2:
-        print("PR/ROC пропущены: классов не 2, а", n)
-        return
-
-    present = np.unique(y_true_idx)
-    if len(present) < 2:
-        print("PR/ROC пропущены: в выбранной выборке присутствует только один класс:", present.tolist())
-        return
-
-    y_true = (y_true_idx == pos_class).astype(int)
-    if np.sum(y_true == 1) == 0 or np.sum(y_true == 0) == 0:
-        print("PR/ROC пропущены: после выбора pos_class один из классов отсутствует.")
-        return
-
-    y_score = prob_mat[:, pos_class].astype(float)
-    recall, precision = _binary_pr_curve(y_true, y_score)
-    fpr, tpr = _binary_roc_curve(y_true, y_score)
-
-    plt.figure(figsize=(8, 6))
-    plt.plot(recall, precision)
-    plt.title("PR-кривая (binary)")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(out_dir / "pr_curve_custom.png", dpi=150)
-    plt.show()
-
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr, tpr)
-    plt.title("ROC-кривая (binary)")
-    plt.xlabel("FPR")
-    plt.ylabel("TPR")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(out_dir / "roc_curve_custom.png", dpi=150)
-    plt.show()
-
-    plt.figure(figsize=(8, 6))
-    plt.hist(y_score[y_true == 1], bins=30, alpha=0.7, label="pos (true=1)")
-    plt.hist(y_score[y_true == 0], bins=30, alpha=0.7, label="neg (true=0)")
-    plt.title("Распределение score(pos)")
-    plt.xlabel("score(pos)")
-    plt.ylabel("count")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_dir / "score_hist_pos.png", dpi=150)
-    plt.show()
-
-def _plot_confidence_graphs(top1_conf: np.ndarray, top2_conf: np.ndarray, y_true: np.ndarray, class_names: list, out_dir: Path):
-    margin = top1_conf - top2_conf
-
-    plt.figure(figsize=(10, 6))
-    plt.hist(top1_conf, bins=40)
-    plt.title("Распределение top1 confidence")
-    plt.xlabel("top1_conf")
-    plt.ylabel("count")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(out_dir / "top1_conf_hist.png", dpi=150)
-    plt.show()
-
-    plt.figure(figsize=(10, 6))
-    plt.hist(margin, bins=40)
-    plt.title("Распределение запаса уверенности (top1 - top2)")
-    plt.xlabel("top1-top2")
-    plt.ylabel("count")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(out_dir / "margin_top1_top2_hist.png", dpi=150)
-    plt.show()
-
-    plt.figure(figsize=(10, 6))
-    for ci in sorted(set(int(x) for x in np.unique(y_true))):
-        mask = (y_true == ci)
-        plt.hist(top1_conf[mask], bins=40, alpha=0.6, label=f"true={class_names[ci]}")
-    plt.title("top1 confidence по истинному классу")
-    plt.xlabel("top1_conf")
-    plt.ylabel("count")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_dir / "top1_conf_by_true_class.png", dpi=150)
-    plt.show()
-
-def _plot_class_balance(cls_root: str, class_names: list, out_dir: Path):
-    root = Path(cls_root)
-    tr = root / "train"
-    va = root / "val"
-
-    train_counts = []
-    val_counts = []
-    for c in class_names:
-        train_counts.append(len(_list_images(tr / c)) if (tr / c).exists() else 0)
-        val_counts.append(len(_list_images(va / c)) if (va / c).exists() else 0)
-
-    x = np.arange(len(class_names))
-    width = 0.4
-    plt.figure(figsize=(10, 6))
-    plt.bar(x - width/2, train_counts, width, label="train")
-    plt.bar(x + width/2, val_counts, width, label="val")
-    plt.title("Баланс классов (кол-во изображений)")
-    plt.xticks(x, class_names, rotation=45, ha="right")
-    plt.grid(True, axis="y")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_dir / "class_balance.png", dpi=150)
-    plt.show()
-
-def _eval_on_val(ver, cls_root: str, imgsz: int, device, limit: int, seed: int = 0):
-    val_root = Path(cls_root) / "val"
-    if not val_root.exists():
-        raise FileNotFoundError(f"Не найден CLS_ROOT/val: {val_root}")
-
-    names_map = ver.names
-    if isinstance(names_map, dict):
-        idxs = sorted(names_map.keys())
-        class_names = [names_map[i] for i in idxs]
-    else:
-        class_names = list(names_map)
-
-    name_to_idx = {n: i for i, n in enumerate(class_names)}
-
-    per_class = {}
-    for cname in class_names:
-        d = val_root / cname
-        imgs = _list_images(d) if d.exists() else []
-        if imgs:
-            per_class[name_to_idx[cname]] = imgs
-
-    if not per_class:
-        raise RuntimeError("В CLS_ROOT/val нет изображений в папках классов, соответствующих ver.names")
-
-    rng = np.random.default_rng(seed)
-
-    items = []
-    if limit and limit > 0:
-        n_cls = len(per_class)
-        target = max(1, limit // n_cls)
-        for ci, imgs in per_class.items():
-            k = min(target, len(imgs))
-            pick = rng.choice(len(imgs), size=k, replace=False)
-            for j in pick:
-                items.append((imgs[j], ci))
-        rng.shuffle(items)
-    else:
-        for ci, imgs in per_class.items():
-            for p in imgs:
-                items.append((p, ci))
-        rng.shuffle(items)
-
-    y_true = np.array([ci for _, ci in items], dtype=int)
-
-    prob_list = []
-    y_pred = np.zeros(len(items), dtype=int)
-    top1_conf = np.zeros(len(items), dtype=float)
-    top2_conf = np.zeros(len(items), dtype=float)
-
-    t0 = time.perf_counter()
-    for i, (p, _) in enumerate(items):
-        r = ver.predict(source=str(p), imgsz=imgsz, device=device, verbose=False)[0]
-        probs = r.probs.data.detach().cpu().numpy().astype(float)
-        prob_list.append(probs)
-
-        order = np.argsort(-probs)
-        y_pred[i] = int(order[0])
-        top1_conf[i] = float(probs[order[0]])
-        top2_conf[i] = float(probs[order[1]]) if len(order) > 1 else 0.0
-
-    t_all = time.perf_counter() - t0
-    prob_mat = np.stack(prob_list, axis=0)
-    ms_per_img = (t_all / len(items)) * 1000.0
-
-    return items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img
-
-def _metrics_table(cm: np.ndarray, class_names: list):
-    rows = []
-    total = cm.sum()
-    acc = float(np.trace(cm) / total) if total > 0 else 0.0
-
-    for i, name in enumerate(class_names):
-        tp = float(cm[i, i])
-        fp = float(cm[:, i].sum() - tp)
-        fn = float(cm[i, :].sum() - tp)
-
-        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
-        supp = float(cm[i, :].sum())
-
-        rows.append({"class": name, "precision": prec, "recall": rec, "f1": f1, "support": int(supp)})
-
-    df = pd.DataFrame(rows)
-    macro = {
-        "class": "macro_avg",
-        "precision": float(df["precision"].mean()) if len(df) else 0.0,
-        "recall": float(df["recall"].mean()) if len(df) else 0.0,
-        "f1": float(df["f1"].mean()) if len(df) else 0.0,
-        "support": int(total),
+    total_ms = int(round((time.time() - t0) * 1000))
+    inf_ms = int(round((t_inf1 - t_inf0) * 1000))
+
+    return {
+        "module_id": "cluster_1",
+        "image_w": int(W),
+        "image_h": int(H),
+        "device_used": device_used,
+        "warnings": warnings,
+        "annotated_image_path": "",
+        "cleaned_image_path": "",
+        "artifacts": {
+            "model_path": str(model_path),
+            "count": int(len(dets)),
+        },
+        "timings_ms": {
+            "total": total_ms,
+            "preprocess": 0,
+            "inference": inf_ms,
+            "postprocess": max(0, total_ms - inf_ms),
+        },
+        "detections": dets,
     }
-    df = pd.concat([df, pd.DataFrame([macro])], ignore_index=True)
-    return acc, df
-
-def _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir: Path, max_show: int = 24):
-    bad = np.where(y_true != y_pred)[0]
-    if bad.size == 0:
-        print("Ошибок классификации на выбранной выборке нет.")
-        return
-
-    bad = bad[:min(max_show, bad.size)]
-    cols = 6
-    rows = int(np.ceil(len(bad) / cols))
-
-    plt.figure(figsize=(18, 3 * rows))
-    for k, idx in enumerate(bad, 1):
-        p, _ = items[idx]
-        img = PILImage.open(p).convert("RGB")
-        plt.subplot(rows, cols, k)
-        plt.imshow(img)
-        plt.axis("off")
-        t = class_names[int(y_true[idx])]
-        pr = class_names[int(y_pred[idx])]
-        plt.title(f"true={t} pred={pr} conf={top1_conf[idx]:.3f}")
-
-    plt.tight_layout()
-    plt.savefig(out_dir / "misclassified_grid.png", dpi=150)
-    plt.show()
-
-def show_cls_lab_graphs(ver, RUNS: str, CLS_ROOT: str, name: str, imgsz: int = 128, eval_limit: int = 500):
-    run_dir = _resolve_cls_run_dir(RUNS, name)
-    out_dir = run_dir / "lab_graphs"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    print("CLS run_dir:", run_dir)
-    print("CLS_ROOT:", CLS_ROOT)
-
-    names_map = ver.names
-    if isinstance(names_map, dict):
-        idxs = sorted(names_map.keys())
-        class_names = [names_map[i] for i in idxs]
-    else:
-        class_names = list(names_map)
-
-    csv_fp = run_dir / "results.csv"
-    if csv_fp.exists():
-        df = pd.read_csv(csv_fp)
-        xcol = "epoch" if "epoch" in df.columns else df.columns[0]
-        loss_cols = [c for c in df.columns if "loss" in c.lower()]
-        acc_cols = [c for c in df.columns if ("acc" in c.lower()) or ("accuracy" in c.lower())]
-
-        if loss_cols:
-            _plot_line(df, xcol, loss_cols, "CLS: loss по эпохам", out_dir / "train_loss_curves.png")
-        else:
-            print("В results.csv нет колонок loss:", list(df.columns))
-
-        if acc_cols:
-            _plot_line(df, xcol, acc_cols, "CLS: accuracy по эпохам", out_dir / "train_acc_curves.png")
-        else:
-            print("В results.csv нет колонок accuracy:", list(df.columns))
-    else:
-        print("results.csv не найден:", csv_fp)
-
-    _plot_class_balance(CLS_ROOT, class_names, out_dir)
-
-    items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img = _eval_on_val(
-        ver, CLS_ROOT, imgsz=imgsz, device=CLS_DEVICE, limit=eval_limit, seed=0
-    )
-
-    n_cls = len(class_names)
-    cm = np.zeros((n_cls, n_cls), dtype=int)
-    for t, p in zip(y_true, y_pred):
-        cm[t, p] += 1
-
-    _plot_confusion(cm, class_names, "Confusion matrix (counts)", out_dir / "confusion_counts.png", normalize_rows=False)
-    _plot_confusion(cm, class_names, "Confusion matrix (row-normalized)", out_dir / "confusion_norm.png", normalize_rows=True)
-
-    acc, tbl = _metrics_table(cm, class_names)
-    print("Accuracy:", acc)
-    display(tbl)
-
-    print("Среднее время инференса на val (мс/изображение):", round(ms_per_img, 2))
-
-    _plot_confidence_graphs(top1_conf, top2_conf, y_true, class_names, out_dir)
-
-    pos_class = 0
-    if "car" in class_names:
-        pos_class = int(class_names.index("car"))
-    _plot_pr_roc_if_binary(y_true, prob_mat, pos_class=pos_class, out_dir=out_dir)
-
-    _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir, max_show=24)
-
-    img_files = sorted([p for p in run_dir.glob("*.png")]) + sorted([p for p in run_dir.glob("*.jpg")])
-    if img_files:
-        print("Ultralytics-артефакты в run_dir:", len(img_files))
-        for p in img_files:
-            display(IPImage(filename=str(p)))
-    else:
-        print("В run_dir нет png/jpg артефактов Ultralytics.")
-
-show_cls_lab_graphs(ver, RUNS, CLS_ROOT, "verifier_car_bg", imgsz=128, eval_limit=500)
-
-def find_cls_results_png(runs_root: str, run_name: str):
-    runs = Path(runs_root)
-
-    cand = [
-        runs / run_name / "results.png",
-        runs / "classify" / run_name / "results.png",
-    ]
-    for p in cand:
-        if p.exists():
-            print("results.png найден:", p)
-            return p
-
-    hits = list(runs.glob("**/results.png"))
-    hits = sorted(hits, key=lambda x: str(x))
-    print("results.png не найден для имени:", run_name)
-    print("Всего results.png в runs:", len(hits))
-    print("Первые 30 путей:")
-    for p in hits[:30]:
-        print(p)
-
-find_cls_results_png(RUNS, CFG["CLS_RUN_NAME"])
-if __name__ == "__main__":
-    init_data()
-
-
-
-
-
-det = get_det_model()
-keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
-
-LAST_UPLOAD = Path("/content/__last_upload.bin")
-
-def get_image_bytes():
-    if LAST_UPLOAD.exists():
-        log(f"Используется сохранённый файл: {LAST_UPLOAD}")
-        return LAST_UPLOAD.read_bytes()
-
-    up = files.upload()
-    if not up:
-        raise RuntimeError("Файл не выбран")
-
-    fn, data = next(iter(up.items()))
-    LAST_UPLOAD.write_bytes(data)
-    log(f"Файл сохранён как: {LAST_UPLOAD}")
-    return data
-
-data = get_image_bytes()
-img = read_image_auto(data)
-
-boxes = detect_tiled(
-    det,
-    img,
-    conf=float(CFG["DET_CONF"]),
-    iou=float(CFG["DET_IOU"]),
-    imgsz=int(TILED_IMGSZ),
-    max_det=int(CFG["DET_MAX_DET"]),
-    nms_thr=float(CFG["DET_NMS_THR"]),
-    tile=int(TILE),
-    overlap=float(OVERLAP),
-    batch=int(CFG["TILED_BATCH"]),
-    keep_ids=keep_ids
-)
-
-vis = img.copy()
-rows = []
-
-for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
-    cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.putText(vis, f"#{i} {c:.2f}", (x1, max(0, y1 - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-    rows.append({"id": i, "bbox": [x1, y1, x2, y2], "conf": round(float(c), 3)})
-
-plt.figure(figsize=(80, 48))
-plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-plt.axis("off")
-plt.show()
-
-print(json.dumps(rows, ensure_ascii=False, indent=2))
-
-def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
-    """
-    Должна вернуть dict в формате ModuleResult:
-    {
-      "module_id": "...",
-      "image_w": int,
-      "image_h": int,
-      "device_used": "gpu|cpu",
-      "warnings": [..],
-      "annotated_image_path": "...",
-      "cleaned_image_path": "...",
-      "artifacts": {...},
-      "timings_ms": {...},
-      "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
-    }
-    """
-    t0 = time.time()
-os.makedirs(out_dir, exist_ok=True)
-
-warnings = []
-
-nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
-
-model_path = str(nb.get("model_path", CFG.get("MODEL_PATH", "")))
-if not model_path:
-    raise FileNotFoundError("Не задан model_path: cfg['notebooks']['vehicle_detect']['model_path']")
-if not Path(model_path).exists():
-    raise FileNotFoundError(f"Файл весов не найден: {model_path}")
-
-CFG["MODEL_PATH"] = model_path
-CFG["DET_CONF"] = float(nb.get("conf", CFG.get("DET_CONF", 0.01)))
-CFG["DET_IOU"] = float(nb.get("iou", CFG.get("DET_IOU", 0.5)))
-CFG["DET_MAX_DET"] = int(nb.get("max_det", CFG.get("DET_MAX_DET", 300)))
-CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
-CFG["TILED_BATCH"] = int(nb.get("tiled_batch", CFG.get("TILED_BATCH", 16)))
-CFG["OVERLAP"] = float(nb.get("overlap", CFG.get("OVERLAP", 0.2)))
-
-tile_v = nb.get("tile", CFG.get("TILE", 640))
-CFG["TILE"] = int(tile_v) if str(tile_v).lower() != "auto" else "auto"
-CFG["AUTO_TILE_TARGET"] = int(nb.get("auto_tile_target", CFG.get("AUTO_TILE_TARGET", 640)))
-
-prefer_gpu = (device_mode or "auto") != "cpu"
-PRED_DEVICE = pick_device(prefer_gpu=prefer_gpu)
-device_used = "gpu" if PRED_DEVICE != "cpu" else "cpu"
-if (device_mode or "auto") == "gpu" and device_used != "gpu":
-    warnings.append("gpu_requested_but_unavailable")
-
-resolve_tile_and_sizes(image_path)
-
-global _DET_MODEL
-_DET_MODEL = None  # чтобы точно подхватил новый MODEL_PATH
-det = get_det_model()
-keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
-
-img = read_image_path(image_path)
-H, W = img.shape[:2]
-
-t_inf0 = time.time()
-boxes = detect_tiled(
-    det, img,
-    conf=float(CFG["DET_CONF"]),
-    iou=float(CFG["DET_IOU"]),
-    imgsz=int(TILED_IMGSZ),
-    max_det=int(CFG["DET_MAX_DET"]),
-    nms_thr=float(CFG["DET_NMS_THR"]),
-    tile=int(TILE),
-    overlap=float(OVERLAP),
-    batch=int(CFG["TILED_BATCH"]),
-    keep_ids=keep_ids
-)
-t_inf1 = time.time()
-
-vis = img.copy()
-dets = []
-for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
-    x1 = max(0, min(int(x1), W - 1))
-    x2 = max(0, min(int(x2), W - 1))
-    y1 = max(0, min(int(y1), H - 1))
-    y2 = max(0, min(int(y2), H - 1))
-    if x2 <= x1 or y2 <= y1:
-        continue
-    cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.putText(vis, f"#{i} {float(c):.2f}", (x1, max(0, y1 - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-    dets.append({
-        "bbox_xyxy": [int(x1), int(y1), int(x2), int(y2)],
-        "conf": float(c),
-        "cls_id": 0,
-        "cls_name": "vehicle",
-        "meta": {}
-    })
-
-annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_1.jpg"))
-cv2.imwrite(annotated_path, vis)
-
-total_ms = int(round((time.time() - t0) * 1000))
-inf_ms = int(round((t_inf1 - t_inf0) * 1000))
-
-return {
-    "module_id": "cluster_1",
-    "image_w": int(W),
-    "image_h": int(H),
-    "device_used": device_used,
-    "warnings": warnings,
-    "annotated_image_path": annotated_path,
-    "cleaned_image_path": "",
-    "artifacts": {"model_path": str(model_path), "count": int(len(dets))},
-    "timings_ms": {"total": total_ms, "preprocess": 0, "inference": inf_ms, "postprocess": max(0, total_ms - inf_ms)},
-    "detections": dets
-}

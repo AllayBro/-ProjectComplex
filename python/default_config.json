@@ -17,6 +17,12 @@
     "iou": 0.55
   },
 
+  "notebooks": {
+    "vehicle_detect": {
+      "model_path": "C:/Users/AllayBro/Desktop/ProjectComplex/yolo/yolo11n-visdrone.pt"
+    }
+  },
+
   "postprocess": {
     "enabled": true,
     "keep_classes": ["car", "truck", "bus", "van", "motorcycle"],

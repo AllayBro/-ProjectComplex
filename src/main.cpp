@@ -3,9 +3,13 @@
 
 #include "MainWindow.h"
 #include "AppConfig.h"
+int main(int argc, char *argv[])
+{
+    QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL);
 
-int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+
+    app.setFont(QFont("Segoe UI", 9));
 
     QCoreApplication::setOrganizationName("AllayBro");
     QCoreApplication::setApplicationName("vk_qt_app");
