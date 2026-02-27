@@ -1,5 +1,7 @@
 #include "ResultView.h"
 
+#include <QSettings>
+#include <QCoreApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -14,7 +16,7 @@
 #include <QByteArray>
 #include <QSet>
 #include <QDir>
-
+#include <QScrollArea>
 #include <QtSql/QSqlDatabase>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
@@ -23,7 +25,6 @@
 #include <QXlsx/xlsxdocument.h>
 #include <QXlsx/xlsxformat.h>
 #endif
-
 ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
 
@@ -52,19 +53,6 @@ ResultView::ResultView(QWidget* parent) : QWidget(parent) {
 
     m_tabs = new QTabWidget();
 
-    // Таблица
-    m_table = new QTableWidget();
-    m_table->setColumnCount(0);
-    m_table->setRowCount(0);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_table->setSelectionBehavior(QAbstractItemView::SelectItems);
-    m_table->setSortingEnabled(true);
-    m_table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_table->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    m_table->horizontalHeader()->setStretchLastSection(false);
-
     // Консоль
     m_log = new QTextEdit();
     m_log->setReadOnly(true);
@@ -72,8 +60,27 @@ ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     m_log->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_log->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
-    m_tabs->addTab(m_table, "Таблица");
+    // Таблицы (подвкладки)
+    m_tables = new QTabWidget();
+    m_tblDetections = makeStdTable(m_tables);
+    m_tblExif = makeStdTable(m_tables);
+    m_tblExif->setSortingEnabled(false);
+    m_tblExif->setColumnCount(2);
+    m_tblExif->setHorizontalHeaderLabels(QStringList() << "key" << "value");
+    m_tblExif->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_tblExif->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+
+    m_tables->addTab(m_tblDetections, "Detections");
+    m_tables->addTab(m_tblExif, "EXIF");
+
+    // Графики (подвкладки)
+    m_plots = new QTabWidget();
+    connect(m_plots, &QTabWidget::currentChanged, this, [this](int){ rescaleAllPlots(); });
+
     m_tabs->addTab(m_log, "Консоль");
+    m_tabs->addTab(m_tables, "Таблицы");
+    m_tabs->addTab(m_plots, "Графики");
+    m_tabs->setCurrentWidget(m_log);
 
     root->addLayout(topBar);
     root->addLayout(imgs, 2);
@@ -122,6 +129,7 @@ void ResultView::resizeEvent(QResizeEvent* e) {
     QWidget::resizeEvent(e);
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
     applyScaled(m_imgResult,   m_srcResult,   m_keyResult,   m_targetResult,   m_scaledResult);
+    rescaleAllPlots();
 }
 
 void ResultView::clearAll() {
@@ -135,9 +143,14 @@ void ResultView::clearAll() {
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
     applyScaled(m_imgResult,   m_srcResult,   m_keyResult,   m_targetResult,   m_scaledResult);
 
-    m_table->setRowCount(0);
-    m_table->setColumnCount(0);
-    m_log->clear();
+    clearDynamicTableTabs();
+    if (m_tblDetections) { m_tblDetections->setRowCount(0); m_tblDetections->setColumnCount(0); }
+    if (m_tblExif) { m_tblExif->setRowCount(0); m_tblExif->setColumnCount(2); }
+
+    clearPlotTabs();
+
+    if (m_log) m_log->clear();
+    if (m_tabs) m_tabs->setCurrentWidget(m_log);
 }
 
 void ResultView::clearRunKeepPreview() {
@@ -147,9 +160,14 @@ void ResultView::clearRunKeepPreview() {
     m_srcResult = QPixmap();
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
-    m_table->setRowCount(0);
-    m_table->setColumnCount(0);
-    m_log->clear();
+    clearDynamicTableTabs();
+    if (m_tblDetections) { m_tblDetections->setRowCount(0); m_tblDetections->setColumnCount(0); }
+    if (m_tblExif) { m_tblExif->setRowCount(0); m_tblExif->setColumnCount(2); }
+
+    clearPlotTabs();
+
+    if (m_log) m_log->clear();
+    if (m_tabs) m_tabs->setCurrentWidget(m_log);
 }
 
 void ResultView::loadOriginal(const QString& path) {
@@ -175,9 +193,14 @@ void ResultView::setPreviewImage(const QString& originalPath) {
     m_srcResult = QPixmap();
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
-    m_table->setRowCount(0);
-    m_table->setColumnCount(0);
+    clearDynamicTableTabs();
+    if (m_tblDetections) { m_tblDetections->setRowCount(0); m_tblDetections->setColumnCount(0); }
+    if (m_tblExif) { m_tblExif->setRowCount(0); m_tblExif->setColumnCount(2); }
+
+    clearPlotTabs();
+
     m_log->clear();
+    if (m_tabs) m_tabs->setCurrentWidget(m_log);
 }
 
 QString ResultView::jsonValueToText(const QJsonValue& v) {
@@ -225,37 +248,39 @@ QStringList ResultView::buildColumns(QStringList& metaKeysOut) const {
     return cols;
 }
 
-void ResultView::rebuildTable() {
+void ResultView::rebuildDetectionsTable() {
+    if (!m_tblDetections) return;
+
     QStringList metaKeys;
     const QStringList cols = buildColumns(metaKeys);
 
-    m_table->setSortingEnabled(false);
-    m_table->clear();
-    m_table->setColumnCount(cols.size());
-    m_table->setHorizontalHeaderLabels(cols);
-    m_table->setRowCount(m_lastResult.detections.size());
+    m_tblDetections->setSortingEnabled(false);
+    m_tblDetections->clear();
+    m_tblDetections->setColumnCount(cols.size());
+    m_tblDetections->setHorizontalHeaderLabels(cols);
+    m_tblDetections->setRowCount(m_lastResult.detections.size());
 
     for (int i = 0; i < m_lastResult.detections.size(); ++i) {
         const auto& d = m_lastResult.detections[i];
         const int w = d.x2 - d.x1;
         const int h = d.y2 - d.y1;
 
-        m_table->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
-        m_table->setItem(i, 1, new QTableWidgetItem(d.clsName));
-        m_table->setItem(i, 2, new QTableWidgetItem(QString::number(d.conf, 'f', 4)));
-        m_table->setItem(i, 3, new QTableWidgetItem(QString::number(w)));
-        m_table->setItem(i, 4, new QTableWidgetItem(QString::number(h)));
+        m_tblDetections->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
+        m_tblDetections->setItem(i, 1, new QTableWidgetItem(d.clsName));
+        m_tblDetections->setItem(i, 2, new QTableWidgetItem(QString::number(d.conf, 'f', 4)));
+        m_tblDetections->setItem(i, 3, new QTableWidgetItem(QString::number(w)));
+        m_tblDetections->setItem(i, 4, new QTableWidgetItem(QString::number(h)));
 
         for (int c = 0; c < metaKeys.size(); ++c) {
             const QString& k = metaKeys[c];
             const QJsonValue v = d.meta.value(k);
             if (!v.isUndefined() && !v.isNull()) {
-                m_table->setItem(i, 5 + c, new QTableWidgetItem(jsonValueToText(v)));
+                m_tblDetections->setItem(i, 5 + c, new QTableWidgetItem(jsonValueToText(v)));
             }
         }
     }
 
-    m_table->setSortingEnabled(true);
+    m_tblDetections->setSortingEnabled(true);
 }
 
 void ResultView::renderResultPixmap() {
@@ -303,36 +328,419 @@ void ResultView::setResult(const ModuleResult& r) {
     m_lastResult = r;
     m_hasResult = true;
 
-    rebuildTable();
+    rebuildDetectionsTable();
     renderResultPixmap();
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
+    rebuildExifTable();
+    rebuildExtraTablesTabs();
+    rebuildPlotsTabs();
+
     // Консоль
-    QStringList lines;
-    lines << ("module_id=" + r.moduleId)
-          << ("device=" + r.deviceUsed)
-          << ("image=" + QString::number(r.imageW) + "x" + QString::number(r.imageH));
+    if (m_log) {
+        const QString cur = m_log->toPlainText().trimmed();
 
-    if (!r.timingsMs.isEmpty()) {
-        QJsonDocument td(r.timingsMs);
-        lines << ("timings_ms=" + QString::fromUtf8(td.toJson(QJsonDocument::Compact)));
+        if (cur.isEmpty()) {
+            if (!r.consoleStdout.isEmpty() || !r.consoleStderr.isEmpty()) {
+                QStringList all;
+                all << r.consoleStdout;
+                if (!r.consoleStderr.isEmpty()) {
+                    all << "---- STDERR ----";
+                    all << r.consoleStderr;
+                }
+                m_log->setPlainText(all.join("\n"));
+            }
+        }
+
+        m_log->append("");
+        m_log->append("---- RESULT ----");
+        m_log->append("module_id=" + r.moduleId);
+        m_log->append("device=" + r.deviceUsed);
+        m_log->append("image=" + QString::number(r.imageW) + "x" + QString::number(r.imageH));
+
+        if (!r.timingsMs.isEmpty()) {
+            QJsonDocument td(r.timingsMs);
+            m_log->append("timings_ms=" + QString::fromUtf8(td.toJson(QJsonDocument::Compact)));
+        }
+        if (!r.warnings.isEmpty()) {
+            m_log->append("warnings=" + r.warnings.join(" | "));
+        }
+        m_log->append("detections=" + QString::number(r.detections.size()));
     }
-    if (!r.warnings.isEmpty()) lines << ("warnings=" + r.warnings.join(" | "));
+}
 
-    lines << "Размеры машин (номер, ширина, высота):";
-    for (int i = 0; i < r.detections.size(); ++i) {
-        const auto& d = r.detections[i];
-        const int w = d.x2 - d.x1;
-        const int h = d.y2 - d.y1;
-        lines << ("  #" + QString::number(i + 1) + ": " + QString::number(w) + " x " + QString::number(h) + " пикселей");
+QTableWidget* ResultView::makeStdTable(QWidget* parent) {
+    auto* t = new QTableWidget(parent);
+    t->setColumnCount(0);
+    t->setRowCount(0);
+    t->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    t->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    t->setSelectionBehavior(QAbstractItemView::SelectItems);
+    t->setSortingEnabled(true);
+    t->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    t->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    t->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    t->horizontalHeader()->setStretchLastSection(false);
+    return t;
+}
+
+void ResultView::applyScaledToTarget(QLabel* lbl,
+                                    const QPixmap& src,
+                                    quint64& lastKey,
+                                    QSize& lastTarget,
+                                    QPixmap& cachedScaled,
+                                    const QSize& target) {
+    if (!lbl) return;
+    if (src.isNull()) {
+        lbl->clear();
+        lastKey = 0;
+        lastTarget = QSize();
+        cachedScaled = QPixmap();
+        return;
     }
 
-    m_log->setPlainText(lines.join("\n"));
+    const quint64 key = src.cacheKey();
+    if (key == lastKey && target == lastTarget && !cachedScaled.isNull()) {
+        lbl->setPixmap(cachedScaled);
+        return;
+    }
+
+    lastKey = key;
+    lastTarget = target;
+
+    if (target.width() <= 0 || target.height() <= 0) {
+        cachedScaled = src;
+        lbl->setPixmap(src);
+        return;
+    }
+
+    cachedScaled = src.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    lbl->setPixmap(cachedScaled);
+}
+
+static QStringList parseCsvLine(const QString& line) {
+    QStringList out;
+    QString cur;
+    bool inq = false;
+
+    for (int i = 0; i < line.size(); ++i) {
+        const QChar ch = line[i];
+
+        if (inq) {
+            if (ch == QLatin1Char('"')) {
+                if (i + 1 < line.size() && line[i + 1] == QLatin1Char('"')) {
+                    cur += QLatin1Char('"');
+                    ++i;
+                } else {
+                    inq = false;
+                }
+            } else {
+                cur += ch;
+            }
+        } else {
+            if (ch == QLatin1Char(',')) {
+                out << cur;
+                cur.clear();
+            } else if (ch == QLatin1Char('"')) {
+                inq = true;
+            } else {
+                cur += ch;
+            }
+        }
+    }
+    out << cur;
+    return out;
+}
+
+bool ResultView::loadCsvToTable(const QString& path, QTableWidget* t, QString& err) {
+    if (!t) { err = "Null table"; return false; }
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) { err = "Cannot open csv: " + path; return false; }
+
+    QTextStream in(&f);
+    in.setEncoding(QStringConverter::Utf8);
+
+    QString headerLine;
+    if (!in.atEnd()) headerLine = in.readLine();
+    if (headerLine.isEmpty()) { err = "Empty csv: " + path; return false; }
+
+    const QStringList headers = parseCsvLine(headerLine);
+
+    QVector<QStringList> rows;
+    rows.reserve(512);
+    while (!in.atEnd()) {
+        const QString line = in.readLine();
+        if (line.trimmed().isEmpty()) continue;
+        rows.push_back(parseCsvLine(line));
+    }
+
+    t->setSortingEnabled(false);
+    t->clear();
+    t->setColumnCount(headers.size());
+    t->setHorizontalHeaderLabels(headers);
+    t->setRowCount(rows.size());
+
+    for (int r = 0; r < rows.size(); ++r) {
+        const QStringList& row = rows[r];
+        for (int c = 0; c < headers.size(); ++c) {
+            const QString v = (c < row.size()) ? row[c] : QString();
+            t->setItem(r, c, new QTableWidgetItem(v));
+        }
+    }
+
+    t->setSortingEnabled(true);
+    return true;
+}
+
+QTableWidget* ResultView::buildKvTableFromObject(const QJsonObject& obj, QWidget* parent) {
+    auto* t = makeStdTable(parent);
+    t->setSortingEnabled(false);
+    t->setColumnCount(2);
+    t->setHorizontalHeaderLabels(QStringList() << "key" << "value");
+    t->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    t->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+
+    QStringList keys = obj.keys();
+    std::sort(keys.begin(), keys.end());
+
+    t->setRowCount(keys.size());
+    for (int i = 0; i < keys.size(); ++i) {
+        const QString& k = keys[i];
+        t->setItem(i, 0, new QTableWidgetItem(k));
+        t->setItem(i, 1, new QTableWidgetItem(jsonValueToText(obj.value(k))));
+    }
+
+    t->setSortingEnabled(true);
+    return t;
+}
+
+QTableWidget* ResultView::buildInlineTableFromEntry(const QJsonObject& entry, QWidget* parent) {
+    const QJsonArray colsA = entry.value("columns").toArray();
+    const QJsonArray rowsA = entry.value("rows").toArray();
+
+    QStringList headers;
+    headers.reserve(colsA.size());
+    for (const auto& v : colsA) headers << v.toString();
+
+    auto* t = makeStdTable(parent);
+    t->setSortingEnabled(false);
+    t->clear();
+    t->setColumnCount(headers.size());
+    t->setHorizontalHeaderLabels(headers);
+    t->setRowCount(rowsA.size());
+
+    for (int r = 0; r < rowsA.size(); ++r) {
+        const QJsonArray row = rowsA[r].toArray();
+        for (int c = 0; c < headers.size(); ++c) {
+            const QString v = (c < row.size()) ? jsonValueToText(row[c]) : QString();
+            t->setItem(r, c, new QTableWidgetItem(v));
+        }
+    }
+
+    t->setSortingEnabled(true);
+    return t;
+}
+
+QWidget* ResultView::buildTableWidgetFromEntry(const QJsonObject& entry, QString& outTitle, QString& err) {
+    outTitle = entry.value("title").toString(entry.value("name").toString("Table"));
+    const QString type = entry.value("type").toString();
+
+    if (type == "inline") {
+        return buildInlineTableFromEntry(entry);
+    }
+    if (type == "kv") {
+        const QJsonObject data = entry.value("data").toObject();
+        return buildKvTableFromObject(data);
+    }
+    if (type == "csv") {
+        const QString p = entry.value("path").toString();
+        auto* t = makeStdTable();
+        QString e;
+        if (!loadCsvToTable(p, t, e)) {
+            err = e;
+            t->deleteLater();
+            return nullptr;
+        }
+        return t;
+    }
+    if (type == "json") {
+        const QString p = entry.value("path").toString();
+        QFile f(p);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) { err = "Cannot open json: " + p; return nullptr; }
+        QJsonParseError pe;
+        QJsonDocument d = QJsonDocument::fromJson(f.readAll(), &pe);
+        if (pe.error != QJsonParseError::NoError) { err = "JSON parse error: " + pe.errorString(); return nullptr; }
+
+        if (d.isObject()) {
+            return buildKvTableFromObject(d.object());
+        }
+        if (d.isArray()) {
+            const QJsonArray a = d.array();
+            if (a.isEmpty()) return makeStdTable();
+
+            // массив объектов → таблица
+            QSet<QString> keysSet;
+            for (const auto& v : a) {
+                const QJsonObject o = v.toObject();
+                for (auto it = o.begin(); it != o.end(); ++it) keysSet.insert(it.key());
+            }
+            QStringList keys = keysSet.values();
+            std::sort(keys.begin(), keys.end());
+
+            auto* t = makeStdTable();
+            t->setSortingEnabled(false);
+            t->clear();
+            t->setColumnCount(keys.size());
+            t->setHorizontalHeaderLabels(keys);
+            t->setRowCount(a.size());
+
+            for (int r = 0; r < a.size(); ++r) {
+                const QJsonObject o = a[r].toObject();
+                for (int c = 0; c < keys.size(); ++c) {
+                    const QString& k = keys[c];
+                    t->setItem(r, c, new QTableWidgetItem(jsonValueToText(o.value(k))));
+                }
+            }
+            t->setSortingEnabled(true);
+            return t;
+        }
+
+        err = "Unsupported json root";
+        return nullptr;
+    }
+
+    err = "Unknown table type: " + type;
+    return nullptr;
+}
+
+void ResultView::clearDynamicTableTabs() {
+    if (!m_tables) return;
+    while (m_tables->count() > 2) {
+        QWidget* w = m_tables->widget(2);
+        m_tables->removeTab(2);
+        if (w) w->deleteLater();
+    }
+}
+
+void ResultView::clearPlotTabs() {
+    if (!m_plots) return;
+    while (m_plots->count() > 0) {
+        QWidget* w = m_plots->widget(0);
+        m_plots->removeTab(0);
+        if (w) w->deleteLater();
+    }
+    m_plotCaches.clear();
+}
+
+void ResultView::rebuildExifTable() {
+    if (!m_tblExif) return;
+
+    m_tblExif->setSortingEnabled(false);
+    m_tblExif->clear();
+    m_tblExif->setColumnCount(2);
+    m_tblExif->setHorizontalHeaderLabels(QStringList() << "key" << "value");
+    m_tblExif->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_tblExif->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+
+    QJsonObject ex = m_lastResult.exif;
+    if (ex.contains("data") && ex.value("data").isObject()) ex = ex.value("data").toObject();
+
+    QStringList keys = ex.keys();
+    std::sort(keys.begin(), keys.end());
+
+    m_tblExif->setRowCount(keys.size());
+    for (int i = 0; i < keys.size(); ++i) {
+        const QString& k = keys[i];
+        m_tblExif->setItem(i, 0, new QTableWidgetItem(k));
+        m_tblExif->setItem(i, 1, new QTableWidgetItem(jsonValueToText(ex.value(k))));
+    }
+
+    m_tblExif->setSortingEnabled(true);
+}
+
+void ResultView::rebuildExtraTablesTabs() {
+    clearDynamicTableTabs();
+    if (!m_tables) return;
+
+    const QJsonArray a = m_lastResult.tables;
+    for (const auto& v : a) {
+        if (!v.isObject()) continue;
+        const QJsonObject e = v.toObject();
+
+        QString title;
+        QString err;
+        QWidget* w = buildTableWidgetFromEntry(e, title, err);
+        if (!w) {
+            if (m_log) m_log->append("TABLE SKIP: " + title + " (" + err + ")");
+            continue;
+        }
+
+        m_tables->addTab(w, title);
+    }
+}
+
+void ResultView::rebuildPlotsTabs() {
+    clearPlotTabs();
+    if (!m_plots) return;
+
+    const QJsonArray a = m_lastResult.plots;
+    for (const auto& v : a) {
+        QString title;
+        QString path;
+
+        if (v.isString()) {
+            path = v.toString();
+            title = QFileInfo(path).completeBaseName();
+        } else if (v.isObject()) {
+            const QJsonObject o = v.toObject();
+            path = o.value("path").toString();
+            title = o.value("title").toString(o.value("name").toString(QFileInfo(path).completeBaseName()));
+        } else {
+            continue;
+        }
+
+        if (path.isEmpty() || !QFileInfo(path).exists()) continue;
+
+        QPixmap pm(path);
+        if (pm.isNull()) continue;
+
+        auto* lbl = new QLabel();
+        lbl->setAlignment(Qt::AlignCenter);
+        lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+
+        auto* sa = new QScrollArea();
+        sa->setWidgetResizable(true);
+        sa->setFrameShape(QFrame::NoFrame);
+        sa->setWidget(lbl);
+
+        m_plots->addTab(sa, title);
+
+        PlotCache pc;
+        pc.area = sa;
+        pc.label = lbl;
+        pc.src = pm;
+        m_plotCaches.push_back(pc);
+    }
+
+    rescaleAllPlots();
+}
+
+void ResultView::rescaleAllPlots() {
+    for (int i = 0; i < m_plotCaches.size(); ++i) {
+        PlotCache& pc = m_plotCaches[i];
+        if (!pc.label || pc.src.isNull()) continue;
+
+        QSize target = pc.label->size();
+        if (pc.area && pc.area->viewport()) target = pc.area->viewport()->size();
+
+        applyScaledToTarget(pc.label, pc.src, pc.key, pc.target, pc.scaled, target);
+    }
 }
 
 void ResultView::onSaveImage() {
     if (m_srcResult.isNull()) {
-        m_log->append("\nНет результата для сохранения.");
+        if (m_log) m_log->append("\nНет результата для сохранения.");
         return;
     }
 
@@ -342,19 +750,52 @@ void ResultView::onSaveImage() {
         "BMP (*.bmp);;"
         "WEBP (*.webp)";
 
-    const QString suggestedDir = QFileInfo(m_originalPath).exists()
-        ? QFileInfo(m_originalPath).absolutePath()
-        : QDir::homePath();
+    const QString iniPath = QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
+    QSettings st(iniPath, QSettings::IniFormat);
 
-    const QString path = QFileDialog::getSaveFileName(this, "Сохранить изображение", suggestedDir, filter);
+    QString suggestedDir = st.value("paths/last_save_image_dir", "").toString();
+    if (suggestedDir.isEmpty() || !QDir(suggestedDir).exists()) {
+        suggestedDir = QFileInfo(m_originalPath).exists()
+            ? QFileInfo(m_originalPath).absolutePath()
+            : QDir::homePath();
+    }
+
+    QString suggestedFile = "result.png";
+    if (QFileInfo(m_originalPath).exists()) {
+        const QString base = QFileInfo(m_originalPath).completeBaseName();
+        if (!base.isEmpty()) suggestedFile = base + "_result.png";
+    }
+
+    const QString suggestedPath = QDir(suggestedDir).filePath(suggestedFile);
+
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(
+        this,
+        "Сохранить изображение",
+        suggestedPath,
+        filter,
+        &selectedFilter
+    );
     if (path.isEmpty()) return;
 
+    if (QFileInfo(path).suffix().isEmpty()) {
+        QString ext = ".png";
+        const QString f = selectedFilter.toLower();
+        if (f.contains("*.jpg") || f.contains("*.jpeg")) ext = ".jpg";
+        else if (f.contains("*.bmp")) ext = ".bmp";
+        else if (f.contains("*.webp")) ext = ".webp";
+        path += ext;
+    }
+
     if (!m_srcResult.save(path)) {
-        m_log->append("\nОшибка сохранения изображения: " + path);
+        if (m_log) m_log->append("\nОшибка сохранения изображения: " + path);
         return;
     }
 
-    m_log->append("\nИзображение сохранено: " + path);
+    st.setValue("paths/last_save_image_dir", QFileInfo(path).absolutePath());
+    st.sync();
+
+    if (m_log) m_log->append("\nИзображение сохранено: " + path);
 }
 
 bool ResultView::exportCSV(const QString& path, QString& err) const {
@@ -448,14 +889,14 @@ bool ResultView::exportTXT(const QString& path, QString& err) const {
 
     // заголовки
     QStringList headers;
-    for (int c = 0; c < m_table->columnCount(); ++c) headers << m_table->horizontalHeaderItem(c)->text();
+    for (int c = 0; c < m_tblDetections->columnCount(); ++c) headers << m_tblDetections->horizontalHeaderItem(c)->text();
     out << headers.join('\t') << "\n";
 
     // строки
-    for (int r = 0; r < m_table->rowCount(); ++r) {
+    for (int r = 0; r < m_tblDetections->rowCount(); ++r) {
         QStringList row;
-        for (int c = 0; c < m_table->columnCount(); ++c) {
-            QTableWidgetItem* it = m_table->item(r, c);
+        for (int c = 0; c < m_tblDetections->columnCount(); ++c) {
+            QTableWidgetItem* it = m_tblDetections->item(r, c);
             row << (it ? it->text() : "");
         }
         out << row.join('\t') << "\n";
@@ -508,15 +949,15 @@ bool ResultView::exportHTML(const QString& path, QString& err) const {
     out << "</div>";
 
     out << "<table><thead><tr>";
-    for (int c = 0; c < m_table->columnCount(); ++c) {
-        out << "<th>" << m_table->horizontalHeaderItem(c)->text().toHtmlEscaped() << "</th>";
+    for (int c = 0; c < m_tblDetections->columnCount(); ++c) {
+        out << "<th>" << m_tblDetections->horizontalHeaderItem(c)->text().toHtmlEscaped() << "</th>";
     }
     out << "</tr></thead><tbody>";
 
-    for (int r = 0; r < m_table->rowCount(); ++r) {
+    for (int r = 0; r < m_tblDetections->rowCount(); ++r) {
         out << "<tr>";
-        for (int c = 0; c < m_table->columnCount(); ++c) {
-            QTableWidgetItem* it = m_table->item(r, c);
+        for (int c = 0; c < m_tblDetections->columnCount(); ++c) {
+            QTableWidgetItem* it = m_tblDetections->item(r, c);
             out << "<td>" << (it ? it->text().toHtmlEscaped() : "") << "</td>";
         }
         out << "</tr>";

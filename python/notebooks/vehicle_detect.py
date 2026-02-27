@@ -1393,21 +1393,19 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
 
-    model_path = str(nb.get("model_path", cfg.get("model_path", CFG.get("MODEL_PATH", ""))))
-    model_path = model_path.strip().strip('"').strip("'")
-    model_path = os.path.expandvars(os.path.expanduser(model_path))
-    if not model_path or not Path(model_path).exists():
-        # fallback: если путь не задан/не найден — берём веса с HF_URL в кэш
-        model_path = ensure_hf_weight(HF_URL, prefer_path=model_path)
-
+    model_path = str(cfg.get("yolo_model_path", "") or "").strip().strip('"').strip("'")
     if not model_path:
-        raise FileNotFoundError(
-            "Не задан model_path: cfg['notebooks']['vehicle_detect']['model_path']"
-        )
+        raise FileNotFoundError("Не задан yolo_model_path в cfg")
+
+    model_path = os.path.expandvars(os.path.expanduser(model_path))
+    if not Path(model_path).is_absolute():
+        ydir = str(cfg.get("yolo_dir", "") or "").strip()
+        ydir = os.path.expandvars(os.path.expanduser(ydir))
+        if ydir:
+            model_path = str((Path(ydir) / model_path).resolve())
 
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Файл весов не найден: {model_path}")
-
     CFG["MODEL_PATH"] = model_path
     CFG["DET_CONF"] = float(nb.get("conf", CFG.get("DET_CONF", 0.01)))
     CFG["DET_IOU"] = float(nb.get("iou", CFG.get("DET_IOU", 0.5)))

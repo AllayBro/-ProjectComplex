@@ -8,5 +8,11 @@
     { "cluster_id": 3, "title": "Cluster refine" },
     { "cluster_id": 4, "title": "Distance quick" }
   ],
-  "full_pipeline_order": [1, 2, 3, 4]
+  "full_pipeline_order": [1, 2, 3, 4],
+  "map": {
+    "start_offline": false,
+    "offline_tiles_dir": "",
+    "cache_dir": "",
+    "user_agent": "vk_qt_app"
+  }
 }

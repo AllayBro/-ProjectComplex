@@ -12,15 +12,19 @@ class RunnerClient : public QObject {
     Q_OBJECT
 public:
     explicit RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent = nullptr);
+
     void appendLog(const QString& s);
+
     void runCluster(int clusterId,
                     const QString& imagePath,
                     const QString& outputDir,
-                    const QString& deviceMode);
+                    const QString& deviceMode,
+                    const QString& yoloModelPath);
 
     void runFullDistance(const QString& imagePath,
                          const QString& outputDir,
-                         const QString& deviceMode);
+                         const QString& deviceMode,
+                         const QString& yoloModelPath);
 
     signals:
         void started();
@@ -37,11 +41,15 @@ private slots:
 private:
     AppConfig m_cfg;
     QString m_appDir;
-    QProcess* m_proc = nullptr;
 
+    QProcess* m_proc = nullptr;
     QString m_resultJsonPath;
 
+    QString m_stdoutBuf;
+    QString m_stderrBuf;
+
     void startProcess(const QStringList& args);
+
     static bool loadResultJson(const QString& path, ModuleResult& out, QString& err);
     static QString absPath(const QString& appDir, const QString& relOrAbs);
 

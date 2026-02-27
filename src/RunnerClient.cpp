@@ -2,6 +2,7 @@
 
 #include "ModelTypes.h"
 
+#include <QJsonParseError>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -13,8 +14,68 @@
 #include <algorithm>
 #include <functional>
 
+static bool readJsonObjectFile(const QString& path, QJsonObject& out, QString& err) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) { err = "Cannot open json: " + path; return false; }
+
+    QJsonParseError pe;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError) { err = "JSON parse error in " + path + ": " + pe.errorString(); return false; }
+    if (!doc.isObject()) { err = "JSON is not object: " + path; return false; }
+
+    out = doc.object();
+    return true;
+}
+
+static bool writeJsonObjectFile(const QString& path, const QJsonObject& obj, QString& err) {
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { err = "Cannot write json: " + path; return false; }
+    QJsonDocument doc(obj);
+    f.write(doc.toJson(QJsonDocument::Indented));
+    f.close();
+    return true;
+}
+
+static void deepMergeInto(QJsonObject& dst, const QJsonObject& src) {
+    for (auto it = src.begin(); it != src.end(); ++it) {
+        const QString k = it.key();
+        const QJsonValue sv = it.value();
+
+        if (sv.isObject() && dst.value(k).isObject()) {
+            QJsonObject dchild = dst.value(k).toObject();
+            deepMergeInto(dchild, sv.toObject());
+            dst.insert(k, dchild);
+        } else {
+            dst.insert(k, sv);
+        }
+    }
+}
+
+static void consumeTextLines(QString& buffer, QString chunk, const std::function<void(const QString&)>& emitFn) {
+    chunk.replace('\r', '\n');
+    buffer += chunk;
+
+    int nl = buffer.indexOf('\n');
+    while (nl >= 0) {
+        QString line = buffer.left(nl);
+        buffer.remove(0, nl + 1);
+
+        if (!line.trimmed().isEmpty()) emitFn(line);
+        nl = buffer.indexOf('\n');
+    }
+}
+
+static void flushTail(QString& buffer, const std::function<void(const QString&)>& emitFn) {
+    if (!buffer.trimmed().isEmpty()) emitFn(buffer);
+    buffer.clear();
+}
+
 RunnerClient::RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent)
     : QObject(parent), m_cfg(cfg), m_appDir(appDirPath) {}
+
+void RunnerClient::appendLog(const QString& s) {
+    if (!s.trimmed().isEmpty()) emit logLine(s);
+}
 
 QString RunnerClient::absPath(const QString& appDir, const QString& relOrAbs) {
     QFileInfo fi(relOrAbs);
@@ -22,14 +83,35 @@ QString RunnerClient::absPath(const QString& appDir, const QString& relOrAbs) {
     return QDir(appDir).filePath(relOrAbs);
 }
 
-void RunnerClient::runCluster(int clusterId, const QString& imagePath, const QString& outputDir, const QString& deviceMode) {
+void RunnerClient::runCluster(int clusterId,
+                              const QString& imagePath,
+                              const QString& outputDir,
+                              const QString& deviceMode,
+                              const QString& yoloModelPath) {
     const QString runner = absPath(m_appDir, m_cfg.runnerScript);
-    const QString pyCfg  = absPath(m_appDir, m_cfg.pythonConfigJson);
+    const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
     QDir().mkpath(outputDir);
 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     m_resultJsonPath = QDir(outputDir).filePath(QString("result_cluster_%1_%2.json").arg(clusterId).arg(ts));
+
+    QString yoloAbs = yoloModelPath.trimmed();
+    if (yoloAbs.isEmpty()) { emit finishedError("Не выбрана модель YOLO."); return; }
+    if (!QFileInfo(yoloAbs).isAbsolute()) yoloAbs = absPath(m_appDir, yoloAbs);
+    if (!QFileInfo(yoloAbs).exists()) { emit finishedError("Файл модели YOLO не найден: " + yoloAbs); return; }
+
+    QJsonObject cfgObj;
+    QString cfgErr;
+    if (!readJsonObjectFile(basePyCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
+
+    QJsonObject patch = m_cfg.toRunConfigPatch(deviceMode);
+    patch.insert("yolo_dir", absPath(m_appDir, m_cfg.yoloDir));
+    patch.insert("yolo_model_path", yoloAbs);
+    deepMergeInto(cfgObj, patch);
+
+    const QString patchedCfg = QDir(outputDir).filePath(QString("run_cfg_cluster_%1_%2.json").arg(clusterId).arg(ts));
+    if (!writeJsonObjectFile(patchedCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QStringList args;
     args << runner
@@ -38,20 +120,40 @@ void RunnerClient::runCluster(int clusterId, const QString& imagePath, const QSt
          << "--input" << imagePath
          << "--output-dir" << outputDir
          << "--device" << deviceMode
-         << "--config" << pyCfg
+         << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
     startProcess(args);
 }
 
-void RunnerClient::runFullDistance(const QString& imagePath, const QString& outputDir, const QString& deviceMode) {
+void RunnerClient::runFullDistance(const QString& imagePath,
+                                   const QString& outputDir,
+                                   const QString& deviceMode,
+                                   const QString& yoloModelPath) {
     const QString runner = absPath(m_appDir, m_cfg.runnerScript);
-    const QString pyCfg  = absPath(m_appDir, m_cfg.pythonConfigJson);
+    const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
     QDir().mkpath(outputDir);
 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     m_resultJsonPath = QDir(outputDir).filePath(QString("result_full_%1.json").arg(ts));
+
+    QString yoloAbs = yoloModelPath.trimmed();
+    if (yoloAbs.isEmpty()) { emit finishedError("Не выбрана модель YOLO."); return; }
+    if (!QFileInfo(yoloAbs).isAbsolute()) yoloAbs = absPath(m_appDir, yoloAbs);
+    if (!QFileInfo(yoloAbs).exists()) { emit finishedError("Файл модели YOLO не найден: " + yoloAbs); return; }
+
+    QJsonObject cfgObj;
+    QString cfgErr;
+    if (!readJsonObjectFile(basePyCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
+
+    QJsonObject patch = m_cfg.toRunConfigPatch(deviceMode);
+    patch.insert("yolo_dir", absPath(m_appDir, m_cfg.yoloDir));
+    patch.insert("yolo_model_path", yoloAbs);
+    deepMergeInto(cfgObj, patch);
+
+    const QString patchedCfg = QDir(outputDir).filePath(QString("run_cfg_full_%1.json").arg(ts));
+    if (!writeJsonObjectFile(patchedCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QStringList args;
     args << runner
@@ -59,24 +161,16 @@ void RunnerClient::runFullDistance(const QString& imagePath, const QString& outp
          << "--input" << imagePath
          << "--output-dir" << outputDir
          << "--device" << deviceMode
-         << "--config" << pyCfg
+         << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
     startProcess(args);
 }
 
-static void emitLinesNormalized(QProcess* p, bool stderrMode, const std::function<void(const QString&)>& emitFn) {
-    QByteArray b = stderrMode ? p->readAllStandardError() : p->readAllStandardOutput();
-    QString s = QString::fromUtf8(b);
-    s.replace('\r', '\n');
-    const QStringList lines = s.split('\n', Qt::SkipEmptyParts);
-    for (const QString& line : lines) {
-        const QString t = line.trimmed();
-        if (!t.isEmpty()) emitFn(t);
-    }
-}
-
 void RunnerClient::startProcess(const QStringList& args) {
+    m_stdoutBuf.clear();
+    m_stderrBuf.clear();
+
     if (m_proc) {
         m_proc->kill();
         m_proc->deleteLater();
@@ -103,11 +197,15 @@ void RunnerClient::startProcess(const QStringList& args) {
 }
 
 void RunnerClient::onReadyStdout() {
-    emitLinesNormalized(m_proc, false, [this](const QString& t){ emit logLine(t); });
+    if (!m_proc) return;
+    const QByteArray b = m_proc->readAllStandardOutput();
+    consumeTextLines(m_stdoutBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
 void RunnerClient::onReadyStderr() {
-    emitLinesNormalized(m_proc, true, [this](const QString& t){ emit logLine(t); });
+    if (!m_proc) return;
+    const QByteArray b = m_proc->readAllStandardError();
+    consumeTextLines(m_stderrBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
 void RunnerClient::onError(QProcess::ProcessError) {
@@ -118,15 +216,13 @@ void RunnerClient::onError(QProcess::ProcessError) {
 bool RunnerClient::loadResultJson(const QString& path, ModuleResult& out, QString& err) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) { err = "Cannot open result json: " + path; return false; }
-    const QByteArray data = f.readAll();
 
     QJsonParseError pe;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &pe);
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
     if (pe.error != QJsonParseError::NoError) { err = "Result json parse error: " + pe.errorString(); return false; }
     if (!doc.isObject()) { err = "Result json is not object"; return false; }
 
-    QJsonObject o = doc.object();
-    return ModuleResult::fromJson(o, out, err);
+    return ModuleResult::fromJson(doc.object(), out, err);
 }
 
 static QString jsonToCompact(const QJsonValue& v) {
@@ -200,8 +296,7 @@ bool RunnerClient::writeDetectionsCsv(const QString& outDir, ModuleResult& r, QS
         row << csvEscape(QString::number(h));
 
         for (const auto& k : metaSorted) {
-            const QJsonValue v = d.meta.value(k);
-            row << csvEscape(jsonToCompact(v));
+            row << csvEscape(jsonToCompact(d.meta.value(k)));
         }
 
         out << row.join(',') << "\n";
@@ -213,27 +308,31 @@ bool RunnerClient::writeDetectionsCsv(const QString& outDir, ModuleResult& r, QS
     return true;
 }
 
-
 void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
-    if (status != QProcess::NormalExit || exitCode != 0) {
-        const QString err = QString("Process failed: exitCode=%1 status=%2").arg(exitCode).arg((int)status);
-        emit finishedError(err);
-        return;
-    }
+    flushTail(m_stdoutBuf, [this](const QString& line){ emit logLine(line); });
+    flushTail(m_stderrBuf, [this](const QString& line){ emit logLine(line); });
+
+    const bool failed = (status != QProcess::NormalExit || exitCode != 0);
 
     ModuleResult r;
     QString perr;
-    if (!loadResultJson(m_resultJsonPath, r, perr)) {
-        emit finishedError(perr);
+    const bool hasResult = QFileInfo(m_resultJsonPath).exists() && loadResultJson(m_resultJsonPath, r, perr);
+
+    if (hasResult) {
+        const QString outDir = QFileInfo(m_resultJsonPath).absolutePath();
+        QString csvPath;
+        QString cerr;
+        if (!writeDetectionsCsv(outDir, r, csvPath, cerr)) emit logLine("CSV export error: " + cerr);
+        emit finishedOk(r);
+    }
+
+    if (failed) {
+        emit finishedError(QString("Process failed: exitCode=%1 status=%2").arg(exitCode).arg((int)status));
         return;
     }
 
-    const QString outDir = QFileInfo(m_resultJsonPath).absolutePath();
-    QString csvPath;
-    QString cerr;
-    if (!writeDetectionsCsv(outDir, r, csvPath, cerr)) {
-        emit logLine("CSV export error: " + cerr);
+    if (!hasResult) {
+        emit finishedError(perr.isEmpty() ? "No result.json produced" : perr);
+        return;
     }
-
-    emit finishedOk(r);
 }

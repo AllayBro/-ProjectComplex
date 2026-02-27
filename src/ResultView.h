@@ -9,15 +9,22 @@
 #include <QResizeEvent>
 #include <QSize>
 #include <QJsonValue>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QVector>
 
 #include "ModelTypes.h"
+
+class QScrollArea;
 
 class ResultView : public QWidget {
     Q_OBJECT
 public:
     explicit ResultView(QWidget* parent = nullptr);
+
     QTextEdit* logEdit();
     void appendLog(const QString& s);
+
     void clearAll();
     void clearRunKeepPreview();
 
@@ -35,9 +42,14 @@ private:
     QLabel* m_imgOriginal = nullptr;   // слева: исходник
     QLabel* m_imgResult = nullptr;     // справа: результат
 
-    QTabWidget* m_tabs = nullptr;
-    QTableWidget* m_table = nullptr;
-    QTextEdit* m_log = nullptr;
+    QTabWidget* m_tabs = nullptr;      // Консоль / Таблицы / Графики
+    QTextEdit*  m_log  = nullptr;
+
+    QTabWidget*  m_tables = nullptr;   // подвкладки таблиц
+    QTableWidget* m_tblDetections = nullptr;
+    QTableWidget* m_tblExif = nullptr;
+
+    QTabWidget*  m_plots = nullptr;    // подвкладки графиков
 
     QPushButton* m_btnSaveImage = nullptr;
     QPushButton* m_btnExportData = nullptr;
@@ -56,26 +68,56 @@ private:
     QPixmap m_scaledOriginal;
     QPixmap m_scaledResult;
 
+    struct PlotCache {
+        QScrollArea* area = nullptr;
+        QLabel* label = nullptr;
+        QPixmap src;
+        quint64 key = 0;
+        QSize target;
+        QPixmap scaled;
+    };
+    QVector<PlotCache> m_plotCaches;
+
     void applyScaled(QLabel* lbl,
                      const QPixmap& src,
                      quint64& lastKey,
                      QSize& lastTarget,
                      QPixmap& cachedScaled);
 
+    void applyScaledToTarget(QLabel* lbl,
+                             const QPixmap& src,
+                             quint64& lastKey,
+                             QSize& lastTarget,
+                             QPixmap& cachedScaled,
+                             const QSize& target);
+
     void loadOriginal(const QString& path);
     void renderResultPixmap();         // рисуем результат в Qt
 
-    void rebuildTable();               // динамические колонки: только из meta
-    QStringList buildColumns(QStringList& metaKeysOut) const;
+    void rebuildDetectionsTable();     // detections → m_tblDetections
+    void rebuildExifTable();           // exif → m_tblExif
+    void rebuildExtraTablesTabs();     // tables[] → подвкладки
+    void rebuildPlotsTabs();           // plots[] → подвкладки
 
+    void clearDynamicTableTabs();      // удалить подвкладки таблиц (кроме базовых)
+    void clearPlotTabs();              // удалить все вкладки графиков
+
+    void rescaleAllPlots();
+
+    QStringList buildColumns(QStringList& metaKeysOut) const;
+    static QTableWidget* makeStdTable(QWidget* parent = nullptr);
     static QString jsonValueToText(const QJsonValue& v);
     static QString csvEscape(const QString& s);
+
+    static bool loadCsvToTable(const QString& path, QTableWidget* t, QString& err);
+    static QWidget* buildTableWidgetFromEntry(const QJsonObject& entry, QString& outTitle, QString& err);
+    static QTableWidget* buildKvTableFromObject(const QJsonObject& obj, QWidget* parent = nullptr);
+    static QTableWidget* buildInlineTableFromEntry(const QJsonObject& entry, QWidget* parent = nullptr);
 
     bool exportCSV(const QString& path, QString& err) const;
     bool exportJSON(const QString& path, QString& err) const;
     bool exportTXT(const QString& path, QString& err) const;
     bool exportHTML(const QString& path, QString& err) const;
     bool exportSQLite(const QString& path, QString& err) const;
-
     bool exportXLSX(const QString& path, QString& err) const; // требует QXlsx
 };

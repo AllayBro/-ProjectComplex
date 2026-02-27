@@ -1,35 +1,50 @@
 #pragma once
+
 #include <QWidget>
+#include <QString>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>
 #include <QVector>
 
 #include "AppConfig.h"
+#include "ModelTypes.h"
 
 class RunnerClient;
 class ResultView;
-struct ModuleResult;
 
 class ClustersTab : public QWidget {
     Q_OBJECT
 public:
     explicit ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent = nullptr);
 
+    signals:
+        void imageSelected(const QString& imagePath);
+    void resultReady(const QString& imagePath, const ModuleResult& result);
+
 private:
     AppConfig m_cfg;
+    QString m_appDir;
+
     RunnerClient* m_runner = nullptr;
 
     QLineEdit* m_input = nullptr;
     QPushButton* m_browse = nullptr;
 
-    QLineEdit* m_outputDir = nullptr;
-    QPushButton* m_browseOut = nullptr;
+    QComboBox* m_yoloModel = nullptr;
+    QPushButton* m_browseYolo = nullptr;
 
     QComboBox* m_device = nullptr;
 
     QVector<QPushButton*> m_clusterButtons;
+
     ResultView* m_view = nullptr;
+
+    QString m_lastRunImagePath;
+
+    QString yoloDirAbs() const;
+    void reloadYoloModels();
+    QString currentYoloModelPath() const;
 
     void bindRunner();
 };
