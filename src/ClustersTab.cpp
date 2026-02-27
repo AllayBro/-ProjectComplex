@@ -26,11 +26,6 @@ static QString uiDefaultImagesDirClusters() {
     return d;
 }
 
-static QString uiDefaultOutDirClusters() {
-    QString d = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (d.isEmpty()) d = QDir::homePath();
-    return d;
-}
 
 ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent)
     : QWidget(parent), m_cfg(cfg), m_appDir(appDir) {
@@ -82,15 +77,8 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     {
         QSettings s(uiIniPathClusters(), QSettings::IniFormat);
 
-        const QString lastIn = s.value("ui/last_input_path", "").toString();
-
-        QString lastOut = s.value("ui/last_output_dir", "").toString();
-        if (lastOut.isEmpty()) {
-            lastOut = uiDefaultOutDirClusters();
-            s.setValue("ui/last_output_dir", lastOut);
-        }
-
         const QString lastYolo = s.value("ui/last_yolo_model_path", m_cfg.yoloModelPath).toString();
+        const QString lastIn = s.value("ui/last_input_path", "").toString();
 
         reloadYoloModels();
         if (m_yoloModel) {
@@ -199,15 +187,10 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             const QString in = m_input->text().trimmed();
             const QString dev = m_device->currentText();
 
-            QSettings s(uiIniPathClusters(), QSettings::IniFormat);
-            QString out = s.value("ui/last_output_dir", "").toString();
-            if (out.isEmpty()) {
-                out = uiDefaultOutDirClusters();
-                s.setValue("ui/last_output_dir", out);
-            }
+            const QString out = QDir(QDir(m_appDir).filePath("run"))
+                    .filePath(QString("cluster_%1").arg(clusterId));
 
             const QString yolo = currentYoloModelPath();
-
             if (in.isEmpty()) {
                 m_view->logEdit()->append("Ошибка: задайте фото.");
                 return;
@@ -224,14 +207,6 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
                 m_view->logEdit()->append("Ошибка: модель должна быть внутри папки: " + ydir);
                 return;
             }
-
-            QDir().mkpath(out);
-
-            s.setValue("ui/last_input_path", in);
-            s.setValue("ui/last_image_dir", QFileInfo(in).absolutePath());
-            s.setValue("ui/last_output_dir", out);
-            s.setValue("ui/last_yolo_model_path", yolo);
-            s.sync();
 
             m_lastRunImagePath = in;
 

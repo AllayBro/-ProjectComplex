@@ -42,6 +42,8 @@ private:
         QString dateTime;
         QString dateTimeOriginal;
 
+        QJsonObject exif;
+
         bool hasResult = false;
         ModuleResult result;
     };
@@ -57,13 +59,12 @@ private:
     QHash<QString, Item> m_items;
     QString m_selected;
 
-    // online->offline auto
     QNetworkAccessManager* m_nam = nullptr;
     QTimer* m_probeTimer = nullptr;
     QTimer* m_probeTimeout = nullptr;
     QNetworkReply* m_probeReply = nullptr;
 
-    bool m_onlineOk = true;     // стартуем online
+    bool m_onlineOk = true;
     bool m_probeSeen = false;
 
     void initQml();
@@ -74,4 +75,5 @@ private:
     void updateNetLabel();
 
     static bool readExifMini(const QString& imagePath, Item& out);
+    static void applyRunnerExif(const QJsonObject& exifObj, Item& out);
 };

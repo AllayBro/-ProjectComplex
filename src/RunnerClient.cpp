@@ -70,6 +70,40 @@ static void flushTail(QString& buffer, const std::function<void(const QString&)>
     buffer.clear();
 }
 
+static bool resetDirIfUnderRunRoot(const QString& appDir, const QString& outDir, QString& err) {
+    const QString runRootAbs = QDir(appDir).filePath("run");
+
+    const QString rootCanon = QDir(runRootAbs).canonicalPath();
+    QString outCanon = QDir(outDir).canonicalPath();
+
+    const QString root = rootCanon.isEmpty() ? QDir(runRootAbs).absolutePath() : rootCanon;
+    const QString out  = outCanon.isEmpty() ? QDir(outDir).absolutePath() : outCanon;
+
+    const bool underRun = (!root.isEmpty()) && (out == root || out.startsWith(root + QDir::separator()));
+
+    if (underRun) {
+        QDir d(outDir);
+        if (d.exists()) {
+            if (!d.removeRecursively()) {
+                err = "Cannot clear run_dir: " + outDir;
+                return false;
+            }
+        }
+        if (!QDir().mkpath(outDir)) {
+            err = "Cannot create run_dir: " + outDir;
+            return false;
+        }
+        return true;
+    }
+
+    if (!QDir().mkpath(outDir)) {
+        err = "Cannot create output_dir: " + outDir;
+        return false;
+    }
+
+    return true;
+}
+
 RunnerClient::RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent)
     : QObject(parent), m_cfg(cfg), m_appDir(appDirPath) {}
 
@@ -91,7 +125,8 @@ void RunnerClient::runCluster(int clusterId,
     const QString runner = absPath(m_appDir, m_cfg.runnerScript);
     const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
-    QDir().mkpath(outputDir);
+    QString outErr;
+    if (!resetDirIfUnderRunRoot(m_appDir, outputDir, outErr)) { emit finishedError(outErr); return; }
 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     m_resultJsonPath = QDir(outputDir).filePath(QString("result_cluster_%1_%2.json").arg(clusterId).arg(ts));
@@ -133,7 +168,8 @@ void RunnerClient::runFullDistance(const QString& imagePath,
     const QString runner = absPath(m_appDir, m_cfg.runnerScript);
     const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
-    QDir().mkpath(outputDir);
+    QString outErr;
+    if (!resetDirIfUnderRunRoot(m_appDir, outputDir, outErr)) { emit finishedError(outErr); return; }
 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     m_resultJsonPath = QDir(outputDir).filePath(QString("result_full_%1.json").arg(ts));
@@ -319,10 +355,6 @@ void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
     const bool hasResult = QFileInfo(m_resultJsonPath).exists() && loadResultJson(m_resultJsonPath, r, perr);
 
     if (hasResult) {
-        const QString outDir = QFileInfo(m_resultJsonPath).absolutePath();
-        QString csvPath;
-        QString cerr;
-        if (!writeDetectionsCsv(outDir, r, csvPath, cerr)) emit logLine("CSV export error: " + cerr);
         emit finishedOk(r);
     }
 

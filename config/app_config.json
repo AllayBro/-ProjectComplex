@@ -2,6 +2,7 @@
   "python_exe": "python",
   "runner_script": "python/runner.py",
   "python_config_json": "python/default_config.json",
+  "ui_show_regression_tab": false,
   "clusters": [
     { "cluster_id": 1, "title": "Vehicle detect" },
     { "cluster_id": 2, "title": "Rotation" },

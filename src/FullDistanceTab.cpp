@@ -79,13 +79,6 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 
         const QString lastIn = s.value("ui/last_input_path", "").toString();
 
-        QString lastOut = s.value("ui/last_output_dir", uiDefaultOutDirFull()).toString();
-        if (lastOut.isEmpty()) {
-            lastOut = uiDefaultOutDirFull();
-            s.setValue("ui/last_output_dir", lastOut);
-            s.sync();
-        }
-
         const QString lastYolo = s.value("ui/last_yolo_model_path", m_cfg.yoloModelPath).toString();
 
         reloadYoloModels();
@@ -104,13 +97,15 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 
     connect(m_browse, &QPushButton::clicked, this, [this]{
         QSettings s(uiIniPathFull(), QSettings::IniFormat);
+        QString startDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+        if (startDir.isEmpty()) startDir = QDir::homePath();
 
-        QString startDir = s.value("ui/last_image_dir", uiDefaultImagesDirFull()).toString();
         const QString cur = m_input->text().trimmed();
         if (!cur.isEmpty()) {
             QFileInfo fi(cur);
             if (fi.exists()) startDir = fi.absolutePath();
         }
+        const QString out = QDir(QDir(m_appDir).filePath("run")).filePath("full_distance");
 
         const QString p = QFileDialog::getOpenFileName(
             this,
@@ -219,16 +214,13 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
             return;
         }
 
-        QDir().mkpath(out);
 
         s.setValue("ui/last_input_path", in);
         s.setValue("ui/last_image_dir", QFileInfo(in).absolutePath());
-        s.setValue("ui/last_output_dir", out);
         s.setValue("ui/last_yolo_model_path", yolo);
         s.sync();
 
-        m_runner->runFullDistance(m_lastRunImagePath, out, dev, yolo);
-
+        m_lastRunImagePath = in;
         m_view->clearRunKeepPreview();
         m_runner->runFullDistance(in, out, dev, yolo);
     });

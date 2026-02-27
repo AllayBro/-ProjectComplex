@@ -7,6 +7,7 @@
 #include <QTextEdit>
 #include <QFileInfo>
 #include <QFile>
+#include <QDir>
 #include <QPixmap>
 #include <QVariantMap>
 #include <QVariantList>
@@ -61,47 +62,58 @@ Item {
     }
 
     function centerOn(lat, lon) {
-        map.center = QtPositioning.coordinate(lat, lon)
-        if (map.zoomLevel < 13) map.zoomLevel = 13
+        let activeMap = root.offlineMode ? mapOffline : mapOnline
+        activeMap.center = QtPositioning.coordinate(lat, lon)
+        if (activeMap.zoomLevel < 13) activeMap.zoomLevel = 13
+    }
+
+    Component {
+        id: markerDelegate
+        MapQuickItem {
+            coordinate: QtPositioning.coordinate(modelData.lat, modelData.lon)
+            anchorPoint.x: 7
+            anchorPoint.y: 14
+            sourceItem: Rectangle {
+                width: 14; height: 14; radius: 7
+                color: "#e53935"; border.color: "white"; border.width: 2
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.markerClicked(modelData.imagePath)
+                }
+            }
+        }
     }
 
     Map {
-        id: map
+        id: mapOnline
         anchors.fill: parent
-        plugin: root.offlineMode ? osmOffline : osmOnline
+        plugin: osmOnline
+        visible: !root.offlineMode
         zoomLevel: 4
         center: QtPositioning.coordinate(20, 0)
-
         MapItemView {
             model: root.pointsModel
-            delegate: MapQuickItem {
-                coordinate: QtPositioning.coordinate(modelData.lat, modelData.lon)
-                anchorPoint.x: marker.width / 2
-                anchorPoint.y: marker.height
+            delegate: markerDelegate
+        }
+    }
 
-                sourceItem: Rectangle {
-                    id: marker
-                    width: 14
-                    height: 14
-                    radius: 7
-                    color: "#e53935"
-                    border.color: "white"
-                    border.width: 2
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.markerClicked(modelData.imagePath)
-                    }
-                }
-            }
+    Map {
+        id: mapOffline
+        anchors.fill: parent
+        plugin: osmOffline
+        visible: root.offlineMode
+        zoomLevel: 4
+        center: QtPositioning.coordinate(20, 0)
+        MapItemView {
+            model: root.pointsModel
+            delegate: markerDelegate
         }
     }
 }
 )QML");
 }
 
-MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
-    : QWidget(parent), m_cfg(cfg)
+MapTab::MapTab(const AppConfig& cfg, QWidget* parent)    : QWidget(parent), m_cfg(cfg)
 {
     auto* root = new QVBoxLayout(this);
 
@@ -172,46 +184,51 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
 void MapTab::initQml()
 {
     const QString qml = qmlMapView();
-    
-    m_quick->setSource(QUrl()); 
-    m_quick->engine()->clearComponentCache();
+    const QString tempQmlPath = QDir(QCoreApplication::applicationDirPath()).filePath("temp_map.qml");
 
-    QQmlComponent* comp = new QQmlComponent(m_quick->engine(), this);
-    comp->setData(qml.toUtf8(), QUrl(QStringLiteral("inmemory:/MapView.qml")));
+    // Сохраняем QML во временный файл для надежной загрузки
+    QFile f(tempQmlPath);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(qml.toUtf8());
+        f.close();
+    }
 
-    if (comp->isError()) {
-        m_netStatus->setText("QML Error: Component error");
-        m_info->setPlainText(comp->errorString());
-        comp->deleteLater();
+    m_quick->setSource(QUrl::fromLocalFile(tempQmlPath));
+
+    // Проверка статуса загрузки
+    if (m_quick->status() == QQuickWidget::Error) {
+        QStringList errs;
+        for (const auto& e : m_quick->errors()) errs << e.toString();
+        m_netStatus->setText("QML Error");
+        m_info->setPlainText(errs.join("\n"));
         return;
     }
 
-    QObject* obj = comp->create();
-    if (!obj) {
-        m_netStatus->setText("QML Error: Create failed");
-        comp->deleteLater();
-        return;
+    // Если загрузка асинхронная, подождем готовности
+    auto setupRoot = [this]() {
+        QQuickItem* ro = m_quick->rootObject();
+        if (!ro) return;
+
+        connect(ro, SIGNAL(markerClicked(QString)), this, SLOT(onMarkerClicked(QString)));
+        ro->setProperty("userAgent", m_cfg.map.userAgent);
+        ro->setProperty("cacheDir", m_cfg.map.cacheDir);
+        ro->setProperty("offlineDir", m_cfg.map.offlineTilesDir);
+        applyEffectiveModeToQml();
+    };
+
+    if (m_quick->status() == QQuickWidget::Ready) {
+        setupRoot();
+    } else {
+        connect(m_quick, &QQuickWidget::statusChanged, this, [this, setupRoot](QQuickWidget::Status s){
+            if (s == QQuickWidget::Ready) setupRoot();
+            else if (s == QQuickWidget::Error) {
+                QStringList errs;
+                for (const auto& e : m_quick->errors()) errs << e.toString();
+                m_info->setPlainText("Async QML Error:\n" + errs.join("\n"));
+            }
+        });
     }
-
-    // Важно: QQuickWidget берет на себя владение объектом через setContent
-    m_quick->setContent(QUrl(QStringLiteral("inmemory:/MapView.qml")), comp, obj);
-
-    QQuickItem* ro = m_quick->rootObject();
-    if (!ro) {
-        m_netStatus->setText("QML error: rootObject is null");
-        return;
-    }
-
-    connect(ro, SIGNAL(markerClicked(QString)), this, SLOT(onMarkerClicked(QString)));
-    
-    ro->setProperty("userAgent", m_cfg.map.userAgent);
-    ro->setProperty("cacheDir", m_cfg.map.cacheDir);
-    ro->setProperty("offlineDir", m_cfg.map.offlineTilesDir);
-    
-    applyEffectiveModeToQml();
-}
-
-void MapTab::applyEffectiveModeToQml()
+}void MapTab::applyEffectiveModeToQml()
 {
     QQuickItem* ro = m_quick->rootObject();
     if (!ro) return;
@@ -319,6 +336,51 @@ void MapTab::selectItem(const QString& imagePath)
     }
 }
 
+void MapTab::applyRunnerExif(const QJsonObject& exifObj, Item& out)
+{
+    out.exif = exifObj;
+
+    if (exifObj.isEmpty()) return;
+
+    out.hasGps = false;
+    out.lat = 0.0;
+    out.lon = 0.0;
+
+    const QJsonObject gps = exifObj.value("gps").toObject();
+    const QJsonValue latv = gps.value("lat");
+    const QJsonValue lonv = gps.value("lon");
+
+    bool okLat = false;
+    bool okLon = false;
+    double lat = 0.0;
+    double lon = 0.0;
+
+    if (latv.isDouble()) { lat = latv.toDouble(); okLat = true; }
+    else if (latv.isString()) { lat = latv.toString().toDouble(&okLat); }
+
+    if (lonv.isDouble()) { lon = lonv.toDouble(); okLon = true; }
+    else if (lonv.isString()) { lon = lonv.toString().toDouble(&okLon); }
+
+    if (okLat && okLon && qIsFinite(lat) && qIsFinite(lon) && lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0) {
+        out.hasGps = true;
+        out.lat = lat;
+        out.lon = lon;
+    }
+
+    const QJsonObject data = exifObj.value("data").toObject();
+
+    auto setIf = [&](const char* key, QString& dst) {
+        const QJsonValue v = data.value(QString::fromLatin1(key));
+        const QString s = v.toString().trimmed();
+        if (!s.isEmpty()) dst = s;
+    };
+
+    setIf("Make", out.make);
+    setIf("Model", out.model);
+    setIf("DateTime", out.dateTime);
+    setIf("DateTimeOriginal", out.dateTimeOriginal);
+}
+
 void MapTab::updateInfoPanel(const Item& it)
 {
     QPixmap pm(it.imagePath);
@@ -341,6 +403,24 @@ void MapTab::updateInfoPanel(const Item& it)
     if (!it.model.isEmpty()) s << ("model=" + it.model);
     if (!it.dateTime.isEmpty()) s << ("datetime=" + it.dateTime);
     if (!it.dateTimeOriginal.isEmpty()) s << ("datetime_original=" + it.dateTimeOriginal);
+
+    if (!it.exif.isEmpty()) {
+        const QJsonObject data = it.exif.value("data").toObject();
+
+        auto addNum = [&](const char* key, const char* outKey) {
+            const QJsonValue v = data.value(QString::fromLatin1(key));
+            if (v.isDouble()) s << (QString::fromLatin1(outKey) + "=" + QString::number(v.toDouble(), 'f', 6));
+            else if (v.isString()) {
+                const QString t = v.toString().trimmed();
+                if (!t.isEmpty()) s << (QString::fromLatin1(outKey) + "=" + t);
+            }
+        };
+
+        addNum("FNumber", "fnumber");
+        addNum("ExposureTime", "exposure");
+        addNum("FocalLength", "focal");
+        addNum("ISOSpeedRatings", "iso");
+    }
 
     if (it.hasResult) {
         s << "---- result ----";
@@ -379,18 +459,25 @@ void MapTab::onResultReady(const QString& imagePath, const ModuleResult& r)
     const QString p = imagePath.trimmed();
     if (p.isEmpty()) return;
 
-    auto it = m_items.find(p);
+    const QString ap = QFileInfo(p).absoluteFilePath();
+
+    auto it = m_items.find(ap);
     if (it == m_items.end()) {
         Item ni;
-        ni.imagePath = p;
+        ni.imagePath = ap;
         readExifMini(ni.imagePath, ni);
-        it = m_items.insert(p, ni);
+        it = m_items.insert(ap, ni);
     }
 
     it->hasResult = true;
     it->result = r;
 
-    if (m_selected == p)
+    if (!r.exif.isEmpty()) {
+        applyRunnerExif(r.exif, *it);
+        pushModelToQml();
+    }
+
+    if (m_selected == ap)
         updateInfoPanel(*it);
 }
 

@@ -553,6 +553,16 @@ QWidget* ResultView::buildTableWidgetFromEntry(const QJsonObject& entry, QString
         const QJsonObject data = entry.value("data").toObject();
         return buildKvTableFromObject(data);
     }
+    if (type == "exif") {
+        QJsonObject merged = entry.value("data").toObject();
+        const QJsonObject gps = entry.value("gps").toObject();
+        if (!gps.isEmpty()) {
+            for (auto it = gps.begin(); it != gps.end(); ++it) {
+                merged.insert("gps." + it.key(), it.value());
+            }
+        }
+        return buildKvTableFromObject(merged);
+    }
     if (type == "csv") {
         const QString p = entry.value("path").toString();
         auto* t = makeStdTable();
@@ -579,7 +589,6 @@ QWidget* ResultView::buildTableWidgetFromEntry(const QJsonObject& entry, QString
             const QJsonArray a = d.array();
             if (a.isEmpty()) return makeStdTable();
 
-            // массив объектов → таблица
             QSet<QString> keysSet;
             for (const auto& v : a) {
                 const QJsonObject o = v.toObject();
@@ -614,6 +623,7 @@ QWidget* ResultView::buildTableWidgetFromEntry(const QJsonObject& entry, QString
     return nullptr;
 }
 
+
 void ResultView::clearDynamicTableTabs() {
     if (!m_tables) return;
     while (m_tables->count() > 2) {
@@ -643,22 +653,71 @@ void ResultView::rebuildExifTable() {
     m_tblExif->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tblExif->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
 
-    QJsonObject ex = m_lastResult.exif;
-    if (ex.contains("data") && ex.value("data").isObject()) ex = ex.value("data").toObject();
+    QJsonObject data;
+    QJsonObject gps;
 
-    QStringList keys = ex.keys();
+    {
+        QJsonObject exRoot = m_lastResult.exif;
+        if (exRoot.contains("data") && exRoot.value("data").isObject()) data = exRoot.value("data").toObject();
+        else data = exRoot;
+
+        if (exRoot.contains("gps") && exRoot.value("gps").isObject()) gps = exRoot.value("gps").toObject();
+    }
+
+    if (data.isEmpty() && gps.isEmpty()) {
+        const QJsonArray a = m_lastResult.tables;
+        for (const auto& v : a) {
+            if (!v.isObject()) continue;
+            const QJsonObject e = v.toObject();
+
+            const QString type = e.value("type").toString().trimmed();
+            const QString name = e.value("name").toString().trimmed();
+            const QString title = e.value("title").toString().trimmed();
+
+            const QString nameLow = name.toLower();
+            const QString titleLow = title.toLower();
+
+            const bool looksExif = (nameLow == "exif" || titleLow == "exif" || titleLow == "exif table");
+
+            if (type == "exif") {
+                data = e.value("data").toObject();
+                gps  = e.value("gps").toObject();
+                break;
+            }
+            if (type == "kv" && looksExif) {
+                data = e.value("data").toObject();
+                break;
+            }
+        }
+    }
+
+    QJsonObject merged = data;
+    if (!gps.isEmpty()) {
+        for (auto it = gps.begin(); it != gps.end(); ++it) {
+            merged.insert("gps." + it.key(), it.value());
+        }
+    }
+
+    if (merged.isEmpty()) {
+        m_tblExif->setRowCount(1);
+        m_tblExif->setItem(0, 0, new QTableWidgetItem("exif"));
+        m_tblExif->setItem(0, 1, new QTableWidgetItem("нет данных"));
+        m_tblExif->setSortingEnabled(true);
+        return;
+    }
+
+    QStringList keys = merged.keys();
     std::sort(keys.begin(), keys.end());
 
     m_tblExif->setRowCount(keys.size());
     for (int i = 0; i < keys.size(); ++i) {
         const QString& k = keys[i];
         m_tblExif->setItem(i, 0, new QTableWidgetItem(k));
-        m_tblExif->setItem(i, 1, new QTableWidgetItem(jsonValueToText(ex.value(k))));
+        m_tblExif->setItem(i, 1, new QTableWidgetItem(jsonValueToText(merged.value(k))));
     }
 
     m_tblExif->setSortingEnabled(true);
 }
-
 void ResultView::rebuildExtraTablesTabs() {
     clearDynamicTableTabs();
     if (!m_tables) return;
@@ -667,6 +726,16 @@ void ResultView::rebuildExtraTablesTabs() {
     for (const auto& v : a) {
         if (!v.isObject()) continue;
         const QJsonObject e = v.toObject();
+
+        const QString type = e.value("type").toString().trimmed();
+        const QString name = e.value("name").toString().trimmed();
+        const QString titleIn = e.value("title").toString().trimmed();
+
+        const QString nameLow = name.toLower();
+        const QString titleLow = titleIn.toLower();
+
+        const bool looksExif = (type == "exif") || (nameLow == "exif") || (titleLow == "exif") || (titleLow == "exif table");
+        if (looksExif) continue;
 
         QString title;
         QString err;

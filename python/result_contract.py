@@ -302,7 +302,7 @@ def _detections_inline_table(module_result: Optional[Dict[str, Any]]) -> Optiona
     return {"name": "detections", "type": "inline", "columns": cols, "rows": rows}
 
 
-def _collect_tables(module_result: Optional[Dict[str, Any]], exif_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _collect_tables(module_result: Optional[Dict[str, Any]], exif_data: Dict[str, Any], gps_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     tables: List[Dict[str, Any]] = []
 
     det_tbl = _detections_inline_table(module_result)
@@ -328,11 +328,10 @@ def _collect_tables(module_result: Optional[Dict[str, Any]], exif_data: Dict[str
             if exif_json_path:
                 tables.append({"name": "exif_json", "type": "json", "path": exif_json_path})
 
-    if exif_data:
-        tables.append({"name": "exif", "type": "kv", "data": exif_data})
+    if exif_data or gps_data:
+        tables.append({"name": "EXIF", "type": "exif", "data": exif_data, "gps": gps_data})
 
     return tables
-
 
 def _collect_plots(module_result: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     plots: List[Dict[str, Any]] = []
@@ -438,12 +437,14 @@ def build_result(
         meta["error"] = _jsonable(error)
 
     images = _collect_images(input_abs, module_result)
-    tables = _collect_tables(module_result, exif_data)
+    tables = _collect_tables(module_result, exif_data, gps_data)
     plots = _collect_plots(module_result)
 
     return {
+        "vk_schema": "vk_envelope_v1",
         "meta": _jsonable(meta),
-        "console": [str(x) for x in (console_lines or [])],
+        "console": {"stdout": [str(x) for x in (console_lines or [])], "stderr": []},
+        "module": _jsonable(module_result) if isinstance(module_result, dict) else {},
         "images": _jsonable(images),
         "tables": _jsonable(tables),
         "plots": _jsonable(plots),

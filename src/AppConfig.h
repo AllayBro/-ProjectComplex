@@ -29,6 +29,8 @@ public:
     QString yoloDir = "yolo";
     QString yoloModelPath = "yolo11n.pt";
 
+    bool uiShowRegressionTab = false;
+
     QVector<ClusterButtonSpec> clusters;
     MapConfig map;
 

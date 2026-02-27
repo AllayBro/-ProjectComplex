@@ -30,8 +30,10 @@ void MainWindow::setupUi() {
 
     m_tabs = new QTabWidget(this);
 
-    m_reg = new RegressionTab(this);
-    step(62, "Интерфейс: регрессия...");
+    if (m_cfg.uiShowRegressionTab) {
+        m_reg = new RegressionTab(this);
+        step(62, "Интерфейс: регрессия...");
+    }
 
     m_map = new MapTab(m_cfg, this);
     step(70, "Интерфейс: карта...");
@@ -42,7 +44,7 @@ void MainWindow::setupUi() {
     m_full = new FullDistanceTab(m_cfg, m_appDir, this);
     step(90, "Интерфейс: полный режим...");
 
-    m_tabs->addTab(m_reg, "Регрессия");
+    if (m_reg) m_tabs->addTab(m_reg, "Регрессия");
     m_tabs->addTab(m_map, "Карта");
     m_tabs->addTab(m_clusters, "Кластеры (4)");
     m_tabs->addTab(m_full, "Полный режим расстояния");
