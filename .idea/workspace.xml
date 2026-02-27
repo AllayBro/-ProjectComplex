@@ -25,38 +25,14 @@
   <component name="CMakeSettings">
     <configurations>
       <configuration PROFILE_NAME="Debug" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\mingw_64" />
+      <configuration PROFILE_NAME="Release" ENABLED="true" CONFIG_NAME="Release" GENERATION_OPTIONS="-DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\mingw_64" />
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="25.02 - v0.3.2 - Fix notebooks and main.cpp">
-      <change afterPath="$PROJECT_DIR$/assets/icons/app.ico" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/python/result_contract.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/qml/_deploy_imports.qml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/resources/icons.qrc" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/resources/qml/MapView.qml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/app.rc" afterDir="false" />
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.02 - v0.4">
+      <change beforePath="$PROJECT_DIR$/.idea/QtSettings.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/QtSettings.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/app_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/app_config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MainWindow.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ModelTypes.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ModelTypes.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ModelTypes.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ModelTypes.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/HELP.md" beforeDir="false" afterPath="$PROJECT_DIR$/HELP.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -66,7 +42,7 @@
   <component name="ClangdSettings">
     <option name="formatViaClangd" value="false" />
   </component>
-  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
+  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Release" />
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
@@ -222,7 +198,7 @@
       <workItem from="1772111691113" duration="28000" />
       <workItem from="1772111796142" duration="11271000" />
       <workItem from="1772171166156" duration="13667000" />
-      <workItem from="1772186094172" duration="1885000" />
+      <workItem from="1772186094172" duration="3456000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -320,7 +296,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772095436195</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="27.02 - v0.4">
+      <option name="closed" value="true" />
+      <created>1772188053339</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1772188053339</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -348,7 +332,8 @@
     <MESSAGE value="24.02 - v0.2 - Fix Bug clusters, reload CMake and rebuilding runner" />
     <MESSAGE value="25.02 - v0.3" />
     <MESSAGE value="25.02 - v0.3.2 - Fix notebooks and main.cpp" />
-    <option name="LAST_COMMIT_MESSAGE" value="25.02 - v0.3.2 - Fix notebooks and main.cpp" />
+    <MESSAGE value="27.02 - v0.4" />
+    <option name="LAST_COMMIT_MESSAGE" value="27.02 - v0.4" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
