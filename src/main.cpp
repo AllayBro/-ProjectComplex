@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QColor>
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -87,6 +88,8 @@ static QIcon buildWindowIcon(const QImage& logoCropped)
 static QPixmap buildSplashBase(const QImage& logoCropped, int w, int h, int bottomPad)
 {
     QImage base(w, h, QImage::Format_ARGB32_Premultiplied);
+    // Важно: фон должен быть полностью прозрачным,
+    // иначе QSplashScreen будет выглядеть как непрозрачный прямоугольник.
     base.fill(Qt::transparent);
 
     if (!logoCropped.isNull()) {
@@ -162,7 +165,7 @@ int main(int argc, char *argv[])
         ":/icons/app_icon_512.png",
         ":/icons/app_icon_256.png",
         ":/icons/app_icon.png",
-        projectRoot + "/assets/app_icon.png"
+        projectRoot + "/assets/icons/app_icon.png"
     });
 
     const QImage logoCropped = cropTransparent(logoImg);

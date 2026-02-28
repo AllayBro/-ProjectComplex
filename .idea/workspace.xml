@@ -29,21 +29,14 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.02 - v0.4">
-      <change beforePath="$PROJECT_DIR$/.idea/QtSettings.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/QtSettings.xml" afterDir="false" />
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.02 - v0.4.1 - Map">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HELP.md" beforeDir="false" afterPath="$PROJECT_DIR$/HELP.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/app_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/app_config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/result_contract.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/result_contract.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/resources/icons.qrc" beforeDir="false" afterPath="$PROJECT_DIR$/resources/icons.qrc" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RegressionTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/RegressionTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -210,7 +203,9 @@
       <workItem from="1772111691113" duration="28000" />
       <workItem from="1772111796142" duration="11271000" />
       <workItem from="1772171166156" duration="13667000" />
-      <workItem from="1772186094172" duration="7858000" />
+      <workItem from="1772186094172" duration="10388000" />
+      <workItem from="1772281566071" duration="5220000" />
+      <workItem from="1772292386158" duration="2435000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -324,7 +319,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772189710575</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="27.02 - v0.4.1 - Map">
+      <option name="closed" value="true" />
+      <created>1772196346589</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1772196346589</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -353,18 +356,8 @@
     <MESSAGE value="25.02 - v0.3" />
     <MESSAGE value="25.02 - v0.3.2 - Fix notebooks and main.cpp" />
     <MESSAGE value="27.02 - v0.4" />
-    <option name="LAST_COMMIT_MESSAGE" value="27.02 - v0.4" />
-  </component>
-  <component name="XDebuggerManager">
-    <breakpoint-manager>
-      <breakpoints>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/python/notebooks/claster_detect.py</url>
-          <line>8</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-      </breakpoints>
-    </breakpoint-manager>
+    <MESSAGE value="27.02 - v0.4.1 - Map" />
+    <option name="LAST_COMMIT_MESSAGE" value="27.02 - v0.4.1 - Map" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />

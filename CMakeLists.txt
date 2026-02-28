@@ -82,6 +82,10 @@ if (WIN32)
             "${CMAKE_SOURCE_DIR}/python"
             "$<TARGET_FILE_DIR:vk_qt_app>/python"
 
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:vk_qt_app>/assets"
+
             COMMAND "${_windeployqt_exe}"
             --release
             --no-translations
@@ -100,6 +104,10 @@ else()
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/python"
             "$<TARGET_FILE_DIR:vk_qt_app>/python"
+
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:vk_qt_app>/assets"
             VERBATIM
     )
 endif()

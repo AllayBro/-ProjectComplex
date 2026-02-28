@@ -83,7 +83,21 @@ AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
         cfg.map.probeTimeoutMs = mo.value("probe_timeout_ms").toInt(0);
     }
 
+    // Нормализуем пути карты относительно каталога приложения
+    QDir baseDir(appDirPath);
+
+    if (!cfg.map.offlineTilesDir.isEmpty() && !QDir::isAbsolutePath(cfg.map.offlineTilesDir)) {
+        cfg.map.offlineTilesDir = baseDir.filePath(cfg.map.offlineTilesDir);
+    }
+
+    if (!cfg.map.cacheDir.isEmpty() && !QDir::isAbsolutePath(cfg.map.cacheDir)) {
+        cfg.map.cacheDir = baseDir.filePath(cfg.map.cacheDir);
+    }
+
     if (cfg.map.cacheDir.isEmpty()) cfg.map.cacheDir = defaultMapCacheDir();
+    if (cfg.map.probeUrl.isEmpty()) cfg.map.probeUrl = "https://tile.openstreetmap.org/0/0/0.png";
+    if (cfg.map.probeIntervalMs <= 0) cfg.map.probeIntervalMs = 30000;
+    if (cfg.map.probeTimeoutMs <= 0) cfg.map.probeTimeoutMs = 5000;
 
     return cfg;
 }

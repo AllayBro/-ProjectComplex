@@ -2,4 +2,5 @@
 yolo/*.pt
 *.pt
 *.pt
-HELP.md
+/HELP.md
+/release_package.zip

@@ -50,6 +50,13 @@ Item {
         name: "osm"
         PluginParameter { name: "osm.useragent"; value: root.userAgent }
         PluginParameter { name: "osm.mapping.cache.directory"; value: root.cacheDir }
+        PluginParameter { name: "osm.mapping.providersrepository.disabled"; value: true }
+        PluginParameter { name: "osm.mapping.custom.host"; value: "https://tile.openstreetmap.org/" }
+        PluginParameter { name: "osm.mapping.custom.mapcopyright"; value: "OpenStreetMap" }
+        PluginParameter { name: "osm.mapping.custom.datacopyright"; value: "© OpenStreetMap contributors" }
+        PluginParameter { name: "osm.mapping.cache.disk.size"; value: 104857600 }
+        PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "bytesize" }
+        PluginParameter { name: "osm.mapping.prefetching_style"; value: "TwoNeighbourLayers" }
     }
 
     Plugin {
@@ -59,12 +66,22 @@ Item {
         PluginParameter { name: "osm.mapping.cache.directory"; value: root.cacheDir }
         PluginParameter { name: "osm.mapping.offline.directory"; value: root.offlineDir }
         PluginParameter { name: "osm.mapping.providersrepository.disabled"; value: true }
+        PluginParameter { name: "osm.mapping.custom.host"; value: "https://tile.openstreetmap.org/" }
+        PluginParameter { name: "osm.mapping.custom.mapcopyright"; value: "OpenStreetMap" }
+        PluginParameter { name: "osm.mapping.custom.datacopyright"; value: "© OpenStreetMap contributors" }
+        PluginParameter { name: "osm.mapping.cache.disk.size"; value: 104857600 }
+        PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "bytesize" }
     }
 
     function centerOn(lat, lon) {
         let activeMap = root.offlineMode ? mapOffline : mapOnline
         activeMap.center = QtPositioning.coordinate(lat, lon)
         if (activeMap.zoomLevel < 13) activeMap.zoomLevel = 13
+    }
+
+    function setActiveMapType(map) {
+        if (map.supportedMapTypes && map.supportedMapTypes.length > 0)
+            map.activeMapType = map.supportedMapTypes[map.supportedMapTypes.length - 1]
     }
 
     Component {
@@ -89,11 +106,32 @@ Item {
         anchors.fill: parent
         plugin: osmOnline
         visible: !root.offlineMode
-        zoomLevel: 4
-        center: QtPositioning.coordinate(20, 0)
+        zoomLevel: 10
+        center: QtPositioning.coordinate(55.7558, 37.6173)
+        property var startCentroid
         MapItemView {
             model: root.pointsModel
             delegate: markerDelegate
+        }
+        Component.onCompleted: root.setActiveMapType(mapOnline)
+        onMapReadyChanged: if (mapReady) { root.setActiveMapType(mapOnline); prefetchData() }
+        PinchHandler {
+            target: null
+            onActiveChanged: if (active) mapOnline.startCentroid = mapOnline.toCoordinate(centroid.position, false)
+            onScaleChanged: (delta) => {
+                mapOnline.zoomLevel += Math.log2(delta)
+                mapOnline.alignCoordinateToPoint(mapOnline.startCentroid, centroid.position)
+            }
+            grabPermissions: PointerHandler.TakeOverForbidden
+        }
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            rotationScale: 1/120
+            property: "zoomLevel"
+        }
+        DragHandler {
+            target: null
+            onTranslationChanged: (delta) => mapOnline.pan(-delta.x, -delta.y)
         }
     }
 
@@ -102,11 +140,32 @@ Item {
         anchors.fill: parent
         plugin: osmOffline
         visible: root.offlineMode
-        zoomLevel: 4
-        center: QtPositioning.coordinate(20, 0)
+        zoomLevel: 10
+        center: QtPositioning.coordinate(55.7558, 37.6173)
+        property var startCentroid
         MapItemView {
             model: root.pointsModel
             delegate: markerDelegate
+        }
+        Component.onCompleted: root.setActiveMapType(mapOffline)
+        onMapReadyChanged: if (mapReady) { root.setActiveMapType(mapOffline); prefetchData() }
+        PinchHandler {
+            target: null
+            onActiveChanged: if (active) mapOffline.startCentroid = mapOffline.toCoordinate(centroid.position, false)
+            onScaleChanged: (delta) => {
+                mapOffline.zoomLevel += Math.log2(delta)
+                mapOffline.alignCoordinateToPoint(mapOffline.startCentroid, centroid.position)
+            }
+            grabPermissions: PointerHandler.TakeOverForbidden
+        }
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            rotationScale: 1/120
+            property: "zoomLevel"
+        }
+        DragHandler {
+            target: null
+            onTranslationChanged: (delta) => mapOffline.pan(-delta.x, -delta.y)
         }
     }
 }
@@ -246,7 +305,8 @@ void MapTab::updateNetLabel()
     const bool offline = m_cfg.map.startOffline ? true : (!m_onlineOk && m_probeSeen);
     const QString mode = offline ? "OFFLINE" : "ONLINE";
     const QString net = m_probeSeen ? (m_onlineOk ? "internet=ok" : "internet=fail") : "internet=checking";
-    m_netStatus->setText(mode + "  |  " + net);
+    const QString source = offline ? "cache/offline" : "tile.openstreetmap.org";
+    m_netStatus->setText(mode + "  |  " + net + "  |  " + source);
 }
 
 void MapTab::probeNetworkNow()
