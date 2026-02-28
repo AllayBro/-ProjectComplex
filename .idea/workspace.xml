@@ -29,15 +29,7 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.02 - v0.4.1 - Map">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/resources/icons.qrc" beforeDir="false" afterPath="$PROJECT_DIR$/resources/icons.qrc" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
-    </list>
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="28.02 - v0.4.2 - Fix  map" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -205,7 +197,7 @@
       <workItem from="1772171166156" duration="13667000" />
       <workItem from="1772186094172" duration="10388000" />
       <workItem from="1772281566071" duration="5220000" />
-      <workItem from="1772292386158" duration="2435000" />
+      <workItem from="1772292386158" duration="3037000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -327,7 +319,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772196346589</updated>
     </task>
-    <option name="localTasksCounter" value="16" />
+    <task id="LOCAL-00016" summary="28.02 - v0.4.2 - Fix  map">
+      <option name="closed" value="true" />
+      <created>1772304234944</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1772304234944</updated>
+    </task>
+    <option name="localTasksCounter" value="17" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -357,7 +357,8 @@
     <MESSAGE value="25.02 - v0.3.2 - Fix notebooks and main.cpp" />
     <MESSAGE value="27.02 - v0.4" />
     <MESSAGE value="27.02 - v0.4.1 - Map" />
-    <option name="LAST_COMMIT_MESSAGE" value="27.02 - v0.4.1 - Map" />
+    <MESSAGE value="28.02 - v0.4.2 - Fix  map" />
+    <option name="LAST_COMMIT_MESSAGE" value="28.02 - v0.4.2 - Fix  map" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />
