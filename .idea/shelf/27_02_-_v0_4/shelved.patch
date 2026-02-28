@@ -1,0 +1,15 @@
+Index: HELP.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>ProjectComplex\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/HELP.md b/HELP.md
+--- a/HELP.md	(revision bedadb3b44569a1823105c9ee27d308c5037ac69)
++++ b/HELP.md	(date 1772190261937)
+@@ -1,1 +1,2 @@
+-ProjectComplex
++cd /d C:\Users\AllayBro\Desktop\ProjectComplex\cmake-build-debug
++"C:\Qt\6.10.2\mingw_64\bin\windeployqt.exe" --release --compiler-runtime --no-translations --qmldir C:\Users\AllayBro\Desktop\ProjectComplex vk_qt_app.exe
+\ No newline at end of file
