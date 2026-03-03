@@ -11,8 +11,41 @@
 #include <QSet>
 #include <QTextStream>
 #include <QStringConverter>
-#include <algorithm>
+#include <QProcessEnvironment>
 #include <functional>
+#include <algorithm>
+#include <QMap>
+#include <QtMath>
+#include <cstring>
+
+
+static QString quoteForLog(QString s) {
+    if (s.contains('\"')) s.replace('\"', "\\\"");
+    const bool need = s.contains(' ') || s.contains('\t') || s.contains('\n') || s.contains('\r');
+    return need ? ('\"' + s + '\"') : s;
+}
+
+static QString processErrorToText(QProcess::ProcessError e) {
+    switch (e) {
+    case QProcess::FailedToStart: return "FailedToStart";
+    case QProcess::Crashed:       return "Crashed";
+    case QProcess::Timedout:      return "Timedout";
+    case QProcess::ReadError:     return "ReadError";
+    case QProcess::WriteError:    return "WriteError";
+    case QProcess::UnknownError:  return "UnknownError";
+    }
+    return "UnknownError";
+}
+
+static QString exitStatusToText(QProcess::ExitStatus s) {
+    switch (s) {
+    case QProcess::NormalExit: return "NormalExit";
+    case QProcess::CrashExit:  return "CrashExit";
+    }
+    return "CrashExit";
+}
+
+
 
 static bool readJsonObjectFile(const QString& path, QJsonObject& out, QString& err) {
     QFile f(path);
@@ -158,6 +191,7 @@ void RunnerClient::runCluster(int clusterId,
          << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
+    m_currentOutDir = outputDir;
     startProcess(args);
 }
 
@@ -200,34 +234,85 @@ void RunnerClient::runFullDistance(const QString& imagePath,
          << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
+    m_currentOutDir = outputDir;
     startProcess(args);
 }
-
 void RunnerClient::startProcess(const QStringList& args) {
     m_stdoutBuf.clear();
     m_stderrBuf.clear();
 
-    if (m_proc) {
-        m_proc->kill();
-        m_proc->deleteLater();
-        m_proc = nullptr;
+    m_cancelRequested = false;
+    m_finishEmitted = false;
+    m_lastCmdLine.clear();
+
+    if (m_proc && m_proc->state() != QProcess::NotRunning) {
+        emit finishedError("Process already running");
+        return;
     }
 
-    m_proc = new QProcess(this);
-    m_proc->setWorkingDirectory(m_appDir);
+    if (!m_proc) {
+        m_proc = new QProcess(this);
+        connect(m_proc, &QProcess::started, this, [this]{ emit started(); });
+        connect(m_proc, &QProcess::readyReadStandardOutput, this, &RunnerClient::onReadyStdout);
+        connect(m_proc, &QProcess::readyReadStandardError,  this, &RunnerClient::onReadyStderr);
+        connect(m_proc, &QProcess::errorOccurred,           this, &RunnerClient::onError);
+        connect(m_proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &RunnerClient::onFinished);
+    }
 
-    connect(m_proc, &QProcess::started, this, [this]{ emit started(); });
-    connect(m_proc, &QProcess::readyReadStandardOutput, this, &RunnerClient::onReadyStdout);
-    connect(m_proc, &QProcess::readyReadStandardError,  this, &RunnerClient::onReadyStderr);
-    connect(m_proc, &QProcess::errorOccurred,           this, &RunnerClient::onError);
-    connect(m_proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &RunnerClient::onFinished);
+    const QString runnerPath = args.isEmpty() ? QString() : args.first();
+    const QString runnerDir  = runnerPath.isEmpty() ? QString() : QFileInfo(runnerPath).absolutePath();
+    if (!runnerDir.isEmpty() && QDir(runnerDir).exists()) m_proc->setWorkingDirectory(runnerDir);
+    else m_proc->setWorkingDirectory(m_appDir);
+
+    // Лог процесса в output-dir
+    m_runLog.close();
+    m_runLogPath.clear();
+    if (!m_currentOutDir.trimmed().isEmpty()) {
+        const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
+        m_runLogPath = QDir(m_currentOutDir).filePath(QString("process_%1.log").arg(ts));
+        m_runLog.setFileName(m_runLogPath);
+        if (!m_runLog.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            emit logLine("WARNING: cannot open run log file: " + m_runLogPath);
+        }
+    }
 
     m_proc->setProgram(m_cfg.pythonExe);
 
     QStringList fullArgs;
     fullArgs << "-u";
+    fullArgs << "-X" << "faulthandler";
     fullArgs << args;
     m_proc->setArguments(fullArgs);
+
+    // Команда (для диагностики)
+    {
+        QStringList parts;
+        parts << quoteForLog(m_cfg.pythonExe);
+        for (const auto& a : fullArgs) parts << quoteForLog(a);
+        m_lastCmdLine = parts.join(' ');
+    }
+
+    // Окружение: стабильная кодировка + PYTHONPATH + faulthandler
+    {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("PYTHONUTF8", "1");
+        env.insert("PYTHONIOENCODING", "utf-8");
+        env.insert("PYTHONFAULTHANDLER", "1");
+
+        const QString sep = QString(QDir::listSeparator());
+        QStringList pp;
+        if (!runnerDir.isEmpty()) pp << runnerDir;
+        pp << m_appDir;
+
+        const QString existing = env.value("PYTHONPATH");
+        if (!existing.isEmpty()) {
+            const QStringList parts = existing.split(QDir::listSeparator(), Qt::SkipEmptyParts);
+            for (const auto& p : parts) pp << p;
+        }
+        env.insert("PYTHONPATH", pp.join(sep));
+
+        m_proc->setProcessEnvironment(env);
+    }
 
     m_proc->start();
 }
@@ -235,18 +320,33 @@ void RunnerClient::startProcess(const QStringList& args) {
 void RunnerClient::onReadyStdout() {
     if (!m_proc) return;
     const QByteArray b = m_proc->readAllStandardOutput();
+    if (m_runLog.isOpen() && !b.isEmpty()) { m_runLog.write(b); m_runLog.flush(); }
     consumeTextLines(m_stdoutBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
 void RunnerClient::onReadyStderr() {
     if (!m_proc) return;
     const QByteArray b = m_proc->readAllStandardError();
+    if (m_runLog.isOpen() && !b.isEmpty()) { m_runLog.write(b); m_runLog.flush(); }
     consumeTextLines(m_stderrBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
-void RunnerClient::onError(QProcess::ProcessError) {
-    const QString s = m_proc ? m_proc->errorString() : QString("Unknown process error");
-    emit finishedError("Process error: " + s);
+void RunnerClient::onError(QProcess::ProcessError err) {
+    if (m_finishEmitted) return;
+
+    const QString es = m_proc ? m_proc->errorString() : QString("Unknown error");
+    const QString et = processErrorToText(err);
+
+    // Для FailedToStart finished может не дать нормального stderr, фиксируем сразу.
+    if (err == QProcess::FailedToStart) {
+        m_finishEmitted = true;
+        if (m_runLog.isOpen()) m_runLog.close();
+        emit finishedError(QString("Process error: %1 (%2) | %3").arg(es).arg(et).arg(m_lastCmdLine));
+        return;
+    }
+
+    // Остальные ошибки (Crashed и т.п.) добиваем на onFinished, без двойного “Ошибка: …”
+    emit logLine(QString("ERROR: %1 (%2)").arg(es).arg(et));
 }
 
 bool RunnerClient::loadResultJson(const QString& path, ModuleResult& out, QString& err) {
@@ -356,15 +456,35 @@ void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
 
     if (hasResult) {
         emit finishedOk(r);
+        // Если результат есть, считаем выполнение успешным даже при ненулевом exitCode.
+        return;
     }
 
     if (failed) {
-        emit finishedError(QString("Process failed: exitCode=%1 status=%2").arg(exitCode).arg((int)status));
+        QString e = QString("Process failed: exitCode=%1 status=%2").arg(exitCode).arg((int)status);
+        if (!m_lastCmdLine.isEmpty()) e += " | " + m_lastCmdLine;
+        emit finishedError(e);
         return;
     }
 
-    if (!hasResult) {
-        emit finishedError(perr.isEmpty() ? "No result.json produced" : perr);
-        return;
+    emit finishedError(perr.isEmpty() ? "No result.json produced" : perr);
+}
+RunnerClient::~RunnerClient() {
+    stop();
+    if (m_proc && m_proc->state() != QProcess::NotRunning) {
+        m_proc->kill();
+        m_proc->waitForFinished(1500);
     }
+    if (m_runLog.isOpen()) m_runLog.close();
+}
+
+bool RunnerClient::isRunning() const {
+    return m_proc && m_proc->state() != QProcess::NotRunning;
+}
+
+void RunnerClient::stop() {
+    m_cancelRequested = true;
+    if (!m_proc) return;
+    if (m_proc->state() == QProcess::NotRunning) return;
+    m_proc->kill();
 }

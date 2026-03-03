@@ -25,6 +25,489 @@
 #include <QXlsx/xlsxdocument.h>
 #include <QXlsx/xlsxformat.h>
 #endif
+static QString b64All(const QByteArray& b) {
+    return QString::fromLatin1(b.toBase64());
+}
+
+static QString bytesToTextLoose(const QByteArray& b) {
+    QString s = QString::fromUtf8(b);
+    if (s.contains(QChar(0xFFFD))) s = QString::fromLatin1(b);
+    return s;
+}
+
+static inline quint16 rd16(const QByteArray& b, int off, bool le, bool* ok) {
+    if (off < 0 || off + 2 > b.size()) { *ok = false; return 0; }
+    const uchar a = (uchar)b[off];
+    const uchar c = (uchar)b[off + 1];
+    *ok = true;
+    return le ? (quint16)(a | (c << 8)) : (quint16)((a << 8) | c);
+}
+
+static inline quint32 rd32(const QByteArray& b, int off, bool le, bool* ok) {
+    if (off < 0 || off + 4 > b.size()) { *ok = false; return 0; }
+    const uchar a = (uchar)b[off];
+    const uchar c = (uchar)b[off + 1];
+    const uchar d = (uchar)b[off + 2];
+    const uchar e = (uchar)b[off + 3];
+    *ok = true;
+    return le ? (quint32)(a | (c << 8) | (d << 16) | (e << 24))
+              : (quint32)((a << 24) | (c << 16) | (d << 8) | e);
+}
+
+static int typeSize(quint16 type) {
+    switch (type) {
+        case 1:  return 1;  // BYTE
+        case 2:  return 1;  // ASCII
+        case 3:  return 2;  // SHORT
+        case 4:  return 4;  // LONG
+        case 5:  return 8;  // RATIONAL
+        case 7:  return 1;  // UNDEFINED
+        case 9:  return 4;  // SLONG
+        case 10: return 8;  // SRATIONAL
+        case 11: return 4;  // FLOAT
+        case 12: return 8;  // DOUBLE
+    }
+    return 0;
+}
+
+static QByteArray entryValueBytes(const QByteArray& tiff, bool le, int entryOff,
+                                  quint16 type, quint32 count, quint32 valueOrOff) {
+    Q_UNUSED(le)
+    const int ts = typeSize(type);
+    if (ts <= 0) return {};
+    const qint64 total = (qint64)ts * (qint64)count;
+    if (total <= 0) return {};
+
+    if (total <= 4) {
+        if (entryOff < 0 || entryOff + 12 > tiff.size()) return {};
+        return tiff.mid(entryOff + 8, (int)total);
+    }
+
+    const int off = (int)valueOrOff;
+    if (off < 0 || off + total > tiff.size()) return {};
+    return tiff.mid(off, (int)total);
+}
+
+static QString tagNameGuess(quint16 tag, const QString& prefix) {
+    const bool gps = prefix.contains("GPS", Qt::CaseInsensitive);
+    if (gps) {
+        switch (tag) {
+            case 0x0000: return "GPSVersionID";
+            case 0x0001: return "GPSLatitudeRef";
+            case 0x0002: return "GPSLatitude";
+            case 0x0003: return "GPSLongitudeRef";
+            case 0x0004: return "GPSLongitude";
+            case 0x0005: return "GPSAltitudeRef";
+            case 0x0006: return "GPSAltitude";
+            case 0x0007: return "GPSTimeStamp";
+            case 0x0012: return "GPSMapDatum";
+            case 0x001D: return "GPSDateStamp";
+        }
+    } else {
+        switch (tag) {
+            case 0x010E: return "ImageDescription";
+            case 0x010F: return "Make";
+            case 0x0110: return "Model";
+            case 0x0112: return "Orientation";
+            case 0x0131: return "Software";
+            case 0x0132: return "DateTime";
+            case 0x013B: return "Artist";
+            case 0x8298: return "Copyright";
+
+            case 0x8769: return "ExifIFDPointer";
+            case 0x8825: return "GPSIFDPointer";
+            case 0xA005: return "InteroperabilityIFDPointer";
+
+            case 0x9003: return "DateTimeOriginal";
+            case 0x9004: return "DateTimeDigitized";
+            case 0x829A: return "ExposureTime";
+            case 0x829D: return "FNumber";
+            case 0x8827: return "ISOSpeedRatings";
+            case 0x920A: return "FocalLength";
+            case 0xA002: return "PixelXDimension";
+            case 0xA003: return "PixelYDimension";
+            case 0xA405: return "FocalLengthIn35mmFilm";
+            case 0xA432: return "LensSpecification";
+            case 0xA433: return "LensMake";
+            case 0xA434: return "LensModel";
+
+            case 0x014A: return "SubIFDs";
+            case 0x0201: return "JPEGInterchangeFormat";
+            case 0x0202: return "JPEGInterchangeFormatLength";
+
+            case 0x9C9B: return "XPTitle";
+            case 0x9C9C: return "XPComment";
+            case 0x9C9D: return "XPAuthor";
+            case 0x9C9E: return "XPKeywords";
+            case 0x9C9F: return "XPSubject";
+        }
+    }
+    return QString("tag_0x%1").arg(QString::number(tag, 16).toUpper().rightJustified(4, '0'));
+}
+
+static QString readNumberListU16(const QByteArray& b, bool le) {
+    bool ok = false;
+    const int n = b.size() / 2;
+    QStringList out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const quint16 v = rd16(b, i * 2, le, &ok);
+        if (!ok) return {};
+        out << QString::number(v);
+    }
+    return out.join(", ");
+}
+
+static QString readNumberListU32(const QByteArray& b, bool le) {
+    bool ok = false;
+    const int n = b.size() / 4;
+    QStringList out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const quint32 v = rd32(b, i * 4, le, &ok);
+        if (!ok) return {};
+        out << QString::number(v);
+    }
+    return out.join(", ");
+}
+
+static QString readNumberListS32(const QByteArray& b, bool le) {
+    bool ok = false;
+    const int n = b.size() / 4;
+    QStringList out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const quint32 u = rd32(b, i * 4, le, &ok);
+        if (!ok) return {};
+        const qint32 v = (qint32)u;
+        out << QString::number(v);
+    }
+    return out.join(", ");
+}
+
+static QString readRationalList(const QByteArray& b, bool le, bool signedRat) {
+    bool ok = false;
+    const int n = b.size() / 8;
+    QStringList out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        if (!signedRat) {
+            const quint32 num = rd32(b, i * 8, le, &ok); if (!ok) return {};
+            const quint32 den = rd32(b, i * 8 + 4, le, &ok); if (!ok || den == 0) return {};
+            out << QString::number((double)num / (double)den, 'f', 6);
+        } else {
+            const qint32 num = (qint32)rd32(b, i * 8, le, &ok); if (!ok) return {};
+            const qint32 den = (qint32)rd32(b, i * 8 + 4, le, &ok); if (!ok || den == 0) return {};
+            out << QString::number((double)num / (double)den, 'f', 6);
+        }
+    }
+    return out.join(", ");
+}
+
+static QString entryToText(const QByteArray& tiff, bool le, int entryOff,
+                           quint16 tag, quint16 type, quint32 count, quint32 valueOrOff) {
+    const QByteArray vb = entryValueBytes(tiff, le, entryOff, type, count, valueOrOff);
+
+    if (type == 2) {
+        QByteArray s = vb;
+        while (!s.isEmpty() && s.back() == '\0') s.chop(1);
+        return bytesToTextLoose(s);
+    }
+    if (type == 3) return readNumberListU16(vb, le);
+    if (type == 4) return readNumberListU32(vb, le);
+    if (type == 9) return readNumberListS32(vb, le);
+    if (type == 5) return readRationalList(vb, le, false);
+    if (type == 10) return readRationalList(vb, le, true);
+
+    if (type == 1 || type == 7) {
+        if (tag == 0x9C9B || tag == 0x9C9C || tag == 0x9C9D || tag == 0x9C9E || tag == 0x9C9F) {
+            if (vb.size() >= 2 && (vb.size() % 2 == 0)) {
+                const char16_t* u = reinterpret_cast<const char16_t*>(vb.constData());
+                const qsizetype n = vb.size() / 2;
+                QString s = QString::fromUtf16(u, n);
+                while (!s.isEmpty() && s.back() == QChar('\0')) s.chop(1);
+                return s;
+            }
+        }
+        if (!vb.isEmpty()) return b64All(vb);
+        return QString("type=%1 count=%2").arg(type).arg(count);
+    }
+
+    if (type == 11) {
+        if (vb.size() % 4 != 0) return QString("type=%1 count=%2").arg(type).arg(count);
+        const int n = vb.size() / 4;
+        QStringList out;
+        out.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            float f;
+            std::memcpy(&f, vb.constData() + i * 4, 4);
+            out << QString::number((double)f, 'f', 6);
+        }
+        return out.join(", ");
+    }
+
+    if (type == 12) {
+        if (vb.size() % 8 != 0) return QString("type=%1 count=%2").arg(type).arg(count);
+        const int n = vb.size() / 8;
+        QStringList out;
+        out.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            double d;
+            std::memcpy(&d, vb.constData() + i * 8, 8);
+            out << QString::number(d, 'f', 12);
+        }
+        return out.join(", ");
+    }
+
+    if (!vb.isEmpty()) return b64All(vb);
+    return QString("type=%1 count=%2").arg(type).arg(count);
+}
+
+static bool parseIfdRecursive(const QByteArray& tiff, bool le, int ifdOff,
+                              const QString& prefix, QSet<int>& visited, QJsonObject* outFlat) {
+    if (ifdOff <= 0 || ifdOff >= tiff.size()) return false;
+    if (visited.contains(ifdOff)) return true;
+    visited.insert(ifdOff);
+
+    bool ok = false;
+    const quint16 n = rd16(tiff, ifdOff, le, &ok);
+    if (!ok) return false;
+
+    const int entriesBase = ifdOff + 2;
+    const int entriesEnd = entriesBase + (int)n * 12;
+    if (entriesEnd + 4 > tiff.size()) return false;
+
+    int exifPtr = 0;
+    int gpsPtr = 0;
+    int interopPtr = 0;
+    QVector<int> subIfds;
+
+    for (quint16 i = 0; i < n; ++i) {
+        const int eoff = entriesBase + (int)i * 12;
+        if (eoff + 12 > tiff.size()) return false;
+
+        const quint16 tag = rd16(tiff, eoff, le, &ok); if (!ok) return false;
+        const quint16 type = rd16(tiff, eoff + 2, le, &ok); if (!ok) return false;
+        const quint32 count = rd32(tiff, eoff + 4, le, &ok); if (!ok) return false;
+        const quint32 vo = rd32(tiff, eoff + 8, le, &ok); if (!ok) return false;
+
+        const QString name = tagNameGuess(tag, prefix);
+        const QString key = prefix + name;
+        const QString val = entryToText(tiff, le, eoff, tag, type, count, vo);
+        outFlat->insert(key, val);
+
+        if (tag == 0x8769) exifPtr = (int)vo;
+        if (tag == 0x8825) gpsPtr = (int)vo;
+        if (tag == 0xA005) interopPtr = (int)vo;
+
+        if (tag == 0x014A) {
+            const QByteArray vb = entryValueBytes(tiff, le, eoff, type, count, vo);
+            if (!vb.isEmpty() && type == 4) {
+                const int k = vb.size() / 4;
+                for (int j = 0; j < k; ++j) {
+                    const quint32 off = rd32(vb, j * 4, le, &ok);
+                    if (ok && (int)off > 0) subIfds.push_back((int)off);
+                }
+            }
+        }
+    }
+
+    const quint32 nextIfd = rd32(tiff, entriesEnd, le, &ok);
+    if (!ok) return false;
+
+    if (exifPtr > 0) parseIfdRecursive(tiff, le, exifPtr, "EXIF.ExifIFD.", visited, outFlat);
+    if (gpsPtr > 0)  parseIfdRecursive(tiff, le, gpsPtr,  "EXIF.GPS.",    visited, outFlat);
+    if (interopPtr > 0) parseIfdRecursive(tiff, le, interopPtr, "EXIF.Interop.", visited, outFlat);
+
+    for (int si = 0; si < subIfds.size(); ++si) {
+        parseIfdRecursive(tiff, le, subIfds[si], QString("EXIF.SubIFD%1.").arg(si), visited, outFlat);
+    }
+
+    if (prefix == "EXIF.IFD0." && nextIfd > 0) {
+        parseIfdRecursive(tiff, le, (int)nextIfd, "EXIF.IFD1.", visited, outFlat);
+    }
+
+    return true;
+}
+
+static void extractExifFromApp1(const QByteArray& app1, QJsonObject* outFlat) {
+    if (!app1.startsWith(QByteArray("Exif\0\0", 6))) return;
+    const QByteArray tiff = app1.mid(6);
+    if (tiff.size() < 8) return;
+
+    const bool le = (tiff[0] == 'I' && tiff[1] == 'I');
+    const bool be = (tiff[0] == 'M' && tiff[1] == 'M');
+    if (!le && !be) return;
+
+    bool ok = false;
+    const quint16 magic = rd16(tiff, 2, le, &ok);
+    if (!ok || magic != 42) return;
+
+    const quint32 ifd0 = rd32(tiff, 4, le, &ok);
+    if (!ok || (int)ifd0 <= 0 || (int)ifd0 >= tiff.size()) return;
+
+    QSet<int> visited;
+    parseIfdRecursive(tiff, le, (int)ifd0, "EXIF.IFD0.", visited, outFlat);
+
+    const QString latRef = outFlat->value("EXIF.GPS.GPSLatitudeRef").toString().trimmed().toUpper();
+    const QString lonRef = outFlat->value("EXIF.GPS.GPSLongitudeRef").toString().trimmed().toUpper();
+    const QString latStr = outFlat->value("EXIF.GPS.GPSLatitude").toString();
+    const QString lonStr = outFlat->value("EXIF.GPS.GPSLongitude").toString();
+
+    auto parseDMS = [](const QString& s, double* out)->bool {
+        const QStringList parts = s.split(',', Qt::SkipEmptyParts);
+        if (parts.size() < 3) return false;
+        bool ok1=false, ok2=false, ok3=false;
+        const double d = parts[0].trimmed().toDouble(&ok1);
+        const double m = parts[1].trimmed().toDouble(&ok2);
+        const double sec = parts[2].trimmed().toDouble(&ok3);
+        if (!ok1 || !ok2 || !ok3) return false;
+        *out = d + m / 60.0 + sec / 3600.0;
+        return true;
+    };
+
+    double lat = 0.0, lon = 0.0;
+    if (parseDMS(latStr, &lat) && parseDMS(lonStr, &lon)) {
+        if (latRef == "S") lat = -lat;
+        if (lonRef == "W") lon = -lon;
+        if (qIsFinite(lat) && qIsFinite(lon) && lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0) {
+            outFlat->insert("GPS.lat_decimal", lat);
+            outFlat->insert("GPS.lon_decimal", lon);
+        }
+    }
+}
+
+static void extractXmpFromApp1(const QByteArray& app1, QJsonObject* outFlat, int idx) {
+    const QByteArray hdr = QByteArray("http://ns.adobe.com/xap/1.0/\0", 29);
+    if (!app1.startsWith(hdr)) return;
+    const QByteArray xml = app1.mid(hdr.size());
+    outFlat->insert(QString("XMP[%1]").arg(idx), bytesToTextLoose(xml));
+}
+
+static void extractIccFromApp2(const QByteArray& app2, QMap<int, QByteArray>& iccParts, int& iccTotal) {
+    const QByteArray hdr = QByteArray("ICC_PROFILE\0", 12);
+    if (!app2.startsWith(hdr)) return;
+    if (app2.size() < 14) return;
+    const int seq = (uchar)app2[12];
+    const int tot = (uchar)app2[13];
+    if (seq <= 0 || tot <= 0) return;
+    iccTotal = tot;
+    iccParts[seq] = app2.mid(14);
+}
+
+static QJsonObject extractAllJpegMetadataFlat(const QString& imagePath) {
+    QJsonObject out;
+
+    QFile f(imagePath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        out.insert("meta.error", "Cannot open file");
+        return out;
+    }
+    const QByteArray jpg = f.readAll();
+    f.close();
+
+    if (jpg.size() < 4 || (uchar)jpg[0] != 0xFF || (uchar)jpg[1] != 0xD8) {
+        out.insert("meta.error", "Not a JPEG");
+        return out;
+    }
+
+    int app1Idx = 0;
+    int xmpIdx = 0;
+    int comIdx = 0;
+    int app13Idx = 0;
+
+    QMap<int, QByteArray> iccParts;
+    int iccTotal = 0;
+
+    int i = 2;
+    while (i + 4 <= jpg.size()) {
+        if ((uchar)jpg[i] != 0xFF) { i++; continue; }
+        while (i < jpg.size() && (uchar)jpg[i] == 0xFF) i++;
+        if (i >= jpg.size()) break;
+
+        const uchar marker = (uchar)jpg[i++];
+        if (marker == 0xD9 || marker == 0xDA) break;
+
+        if (i + 2 > jpg.size()) break;
+        const quint16 segLen = (quint16)(((uchar)jpg[i] << 8) | (uchar)jpg[i + 1]);
+        i += 2;
+        const int segDataLen = (int)segLen - 2;
+        if (segDataLen < 0 || i + segDataLen > jpg.size()) break;
+
+        const QByteArray seg = jpg.mid(i, segDataLen);
+        i += segDataLen;
+
+        if (marker == 0xE1) {
+            out.insert(QString("JPEG.APP1[%1].bytes").arg(app1Idx), segDataLen);
+
+            if (seg.startsWith(QByteArray("Exif\0\0", 6))) {
+                extractExifFromApp1(seg, &out);
+                out.insert(QString("JPEG.APP1[%1].type").arg(app1Idx), "EXIF");
+            } else if (seg.startsWith(QByteArray("http://ns.adobe.com/xap/1.0/", 28))) {
+                extractXmpFromApp1(seg, &out, xmpIdx++);
+                out.insert(QString("JPEG.APP1[%1].type").arg(app1Idx), "XMP");
+            } else {
+                out.insert(QString("JPEG.APP1[%1].type").arg(app1Idx), "APP1");
+                out.insert(QString("JPEG.APP1[%1].base64").arg(app1Idx), b64All(seg));
+            }
+            app1Idx++;
+            continue;
+        }
+
+        if (marker == 0xE2) {
+            extractIccFromApp2(seg, iccParts, iccTotal);
+            continue;
+        }
+
+        if (marker == 0xED) {
+            out.insert(QString("JPEG.APP13[%1].bytes").arg(app13Idx), segDataLen);
+            out.insert(QString("JPEG.APP13[%1].base64").arg(app13Idx), b64All(seg));
+            app13Idx++;
+            continue;
+        }
+
+        if (marker == 0xFE) {
+            out.insert(QString("JPEG.COM[%1]").arg(comIdx), bytesToTextLoose(seg));
+            comIdx++;
+            continue;
+        }
+    }
+
+    if (iccTotal > 0 && !iccParts.isEmpty()) {
+        QByteArray icc;
+        bool okAll = true;
+        for (int k = 1; k <= iccTotal; ++k) {
+            if (!iccParts.contains(k)) { okAll = false; break; }
+            icc += iccParts.value(k);
+        }
+        out.insert("ICC.total_parts", iccTotal);
+        out.insert("ICC.have_parts", iccParts.size());
+        if (okAll && !icc.isEmpty()) out.insert("ICC.profile.base64", b64All(icc));
+    }
+
+    return out;
+}
+
+static void flattenJsonToObject(const QString& prefix, const QJsonValue& v, QJsonObject* out) {
+    if (v.isObject()) {
+        const QJsonObject o = v.toObject();
+        for (auto it = o.begin(); it != o.end(); ++it) {
+            const QString p = prefix.isEmpty() ? it.key() : (prefix + "." + it.key());
+            flattenJsonToObject(p, it.value(), out);
+        }
+        return;
+    }
+    if (v.isArray()) {
+        const QJsonArray a = v.toArray();
+        for (int i = 0; i < a.size(); ++i) {
+            const QString p = prefix + "[" + QString::number(i) + "]";
+            flattenJsonToObject(p, a[i], out);
+        }
+        return;
+    }
+    out->insert(prefix, v);
+}
+
 ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
 
@@ -182,14 +665,12 @@ void ResultView::loadOriginal(const QString& path) {
 
     m_srcOriginal = pm;
 }
-
 void ResultView::setPreviewImage(const QString& originalPath) {
     m_originalPath = originalPath;
     loadOriginal(originalPath);
 
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
 
-    // справа пока пусто (результат появится после обработки)
     m_srcResult = QPixmap();
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
@@ -199,8 +680,14 @@ void ResultView::setPreviewImage(const QString& originalPath) {
 
     clearPlotTabs();
 
-    m_log->clear();
+    if (m_log) m_log->clear();
     if (m_tabs) m_tabs->setCurrentWidget(m_log);
+
+    QJsonObject root;
+    root.insert("file", extractAllJpegMetadataFlat(originalPath));
+    m_lastResult.exif = root;
+
+    rebuildExifTable();
 }
 
 QString ResultView::jsonValueToText(const QJsonValue& v) {
@@ -324,9 +811,24 @@ void ResultView::renderResultPixmap() {
 }
 
 void ResultView::setResult(const ModuleResult& r) {
-    // слева НЕ трогаем: там всегда исходник
+    // Сохраняем метаданные файла, которые были извлечены при выборе изображения (setPreviewImage)
+    QJsonObject fileMetaSaved;
+    if (m_lastResult.exif.contains("file") && m_lastResult.exif.value("file").isObject()) {
+        fileMetaSaved = m_lastResult.exif.value("file").toObject();
+    } else {
+        fileMetaSaved = m_lastResult.exif;
+    }
+
     m_lastResult = r;
     m_hasResult = true;
+
+    // Объединяем: file (из JPEG) + runner (то, что вернул python)
+    if (!fileMetaSaved.isEmpty()) {
+        QJsonObject root;
+        root.insert("file", fileMetaSaved);
+        if (!m_lastResult.exif.isEmpty()) root.insert("runner", m_lastResult.exif);
+        m_lastResult.exif = root;
+    }
 
     rebuildDetectionsTable();
     renderResultPixmap();
@@ -642,7 +1144,6 @@ void ResultView::clearPlotTabs() {
     }
     m_plotCaches.clear();
 }
-
 void ResultView::rebuildExifTable() {
     if (!m_tblExif) return;
 
@@ -653,52 +1154,10 @@ void ResultView::rebuildExifTable() {
     m_tblExif->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tblExif->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
 
-    QJsonObject data;
-    QJsonObject gps;
+    QJsonObject flat;
+    flattenJsonToObject(QString(), m_lastResult.exif, &flat);
 
-    {
-        QJsonObject exRoot = m_lastResult.exif;
-        if (exRoot.contains("data") && exRoot.value("data").isObject()) data = exRoot.value("data").toObject();
-        else data = exRoot;
-
-        if (exRoot.contains("gps") && exRoot.value("gps").isObject()) gps = exRoot.value("gps").toObject();
-    }
-
-    if (data.isEmpty() && gps.isEmpty()) {
-        const QJsonArray a = m_lastResult.tables;
-        for (const auto& v : a) {
-            if (!v.isObject()) continue;
-            const QJsonObject e = v.toObject();
-
-            const QString type = e.value("type").toString().trimmed();
-            const QString name = e.value("name").toString().trimmed();
-            const QString title = e.value("title").toString().trimmed();
-
-            const QString nameLow = name.toLower();
-            const QString titleLow = title.toLower();
-
-            const bool looksExif = (nameLow == "exif" || titleLow == "exif" || titleLow == "exif table");
-
-            if (type == "exif") {
-                data = e.value("data").toObject();
-                gps  = e.value("gps").toObject();
-                break;
-            }
-            if (type == "kv" && looksExif) {
-                data = e.value("data").toObject();
-                break;
-            }
-        }
-    }
-
-    QJsonObject merged = data;
-    if (!gps.isEmpty()) {
-        for (auto it = gps.begin(); it != gps.end(); ++it) {
-            merged.insert("gps." + it.key(), it.value());
-        }
-    }
-
-    if (merged.isEmpty()) {
+    if (flat.isEmpty()) {
         m_tblExif->setRowCount(1);
         m_tblExif->setItem(0, 0, new QTableWidgetItem("exif"));
         m_tblExif->setItem(0, 1, new QTableWidgetItem("нет данных"));
@@ -706,14 +1165,14 @@ void ResultView::rebuildExifTable() {
         return;
     }
 
-    QStringList keys = merged.keys();
+    QStringList keys = flat.keys();
     std::sort(keys.begin(), keys.end());
 
     m_tblExif->setRowCount(keys.size());
     for (int i = 0; i < keys.size(); ++i) {
         const QString& k = keys[i];
         m_tblExif->setItem(i, 0, new QTableWidgetItem(k));
-        m_tblExif->setItem(i, 1, new QTableWidgetItem(jsonValueToText(merged.value(k))));
+        m_tblExif->setItem(i, 1, new QTableWidgetItem(jsonValueToText(flat.value(k))));
     }
 
     m_tblExif->setSortingEnabled(true);

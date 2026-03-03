@@ -1,17 +1,68 @@
 import argparse
+import base64
 import json
+import mimetypes
 import os
+import platform
 import sys
-import traceback
 import time
+import traceback
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from result_contract import build_result
+from PIL import Image, ExifTags
+
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+def _enable_heic_heif() -> None:
+    try:
+        from pillow_heif import register_heif_opener  # type: ignore
+        register_heif_opener()
+        print("[INFO] HEIC/HEIF enabled via pillow-heif")
+    except Exception as e:
+        print(f"[WARNING] HEIC/HEIF not enabled: {e}")
+
+
+def _patch_cv2_imread() -> None:
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:
+        print(f"[WARNING] OpenCV patch skipped: {e}")
+        return
+
+    orig = cv2.imread
+
+    def patched(path: str, flags: int = cv2.IMREAD_COLOR):
+        img = orig(path, flags)
+        if img is not None:
+            return img
+        try:
+            im = Image.open(path)
+            im.load()
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            rgb = np.asarray(im)
+            bgr = rgb[:, :, ::-1].copy()
+            return bgr
+        except Exception:
+            return None
+
+    cv2.imread = patched
+    print("[INFO] cv2.imread patched (Pillow fallback for unsupported formats)")
+
+
+_enable_heic_heif()
+_patch_cv2_imread()
+
+from result_contract import build_result  # noqa: E402
 
 
 def read_json(path: str) -> Dict[str, Any]:
@@ -20,20 +71,13 @@ def read_json(path: str) -> Dict[str, Any]:
 
 
 def write_json(path: str, obj: Dict[str, Any]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="runner.py")
-    ap.add_argument("--task", required=True, choices=["cluster", "distance_full"])
-    ap.add_argument("--cluster-id", type=int, default=0)
-    ap.add_argument("--input", required=True)
-    ap.add_argument("--output-dir", required=True)
-    ap.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"])
-    ap.add_argument("--config", required=True)
-    ap.add_argument("--result-json", required=True)
-    return ap
+def _split_lines(s: str) -> List[str]:
+    return s.splitlines() if s else []
 
 
 class _Tee:
@@ -65,10 +109,200 @@ class _Tee:
             pass
 
 
-def _split_lines(s: str) -> List[str]:
-    if not s:
-        return []
-    return s.splitlines()
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="runner.py")
+    ap.add_argument("--task", required=True, choices=["cluster", "distance_full", "exif"])
+    ap.add_argument("--cluster-id", type=int, default=0)
+    ap.add_argument("--input", required=True)
+    ap.add_argument("--output-dir", required=True)
+    ap.add_argument("--device", default="auto", choices=["auto", "gpu", "cpu"])
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--result-json", required=True)
+    return ap
+
+
+def _iso_utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _safe_b64(b: bytes) -> str:
+    return base64.b64encode(b).decode("ascii")
+
+
+def _exif_tag_name(tag_id: int) -> str:
+    return ExifTags.TAGS.get(tag_id, f"tag_{tag_id}")
+
+
+def _gps_tag_name(tag_id: int) -> str:
+    return ExifTags.GPSTAGS.get(tag_id, f"gps_{tag_id}")
+
+
+def _to_jsonable(v: Any) -> Any:
+    if v is None:
+        return None
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, bytes):
+        return {"_type": "bytes", "base64": _safe_b64(v), "len": len(v)}
+    if isinstance(v, (list, tuple)):
+        return [_to_jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _to_jsonable(val) for k, val in v.items()}
+    try:
+        return str(v)
+    except Exception:
+        return repr(v)
+
+
+def _gps_to_decimal(gps: Dict[str, Any]) -> Dict[str, Any]:
+    def _rat(x) -> float:
+        try:
+            if isinstance(x, tuple) and len(x) == 2 and x[1]:
+                return float(x[0]) / float(x[1])
+            return float(x)
+        except Exception:
+            return float("nan")
+
+    def _dms_to_deg(dms) -> float:
+        try:
+            d = _rat(dms[0])
+            m = _rat(dms[1])
+            s = _rat(dms[2])
+            return d + m / 60.0 + s / 3600.0
+        except Exception:
+            return float("nan")
+
+    out: Dict[str, Any] = {}
+    lat = None
+    lon = None
+    try:
+        lat_ref = str(gps.get("GPSLatitudeRef", "")).upper().strip()
+        lon_ref = str(gps.get("GPSLongitudeRef", "")).upper().strip()
+        lat_val = gps.get("GPSLatitude")
+        lon_val = gps.get("GPSLongitude")
+        if lat_val is not None:
+            lat = _dms_to_deg(lat_val)
+            if lat_ref == "S":
+                lat = -lat
+        if lon_val is not None:
+            lon = _dms_to_deg(lon_val)
+            if lon_ref == "W":
+                lon = -lon
+        if lat is not None and lon is not None:
+            if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                out["GPSLatitudeDecimal"] = lat
+                out["GPSLongitudeDecimal"] = lon
+    except Exception:
+        pass
+    return out
+
+
+def extract_exif_full(path: str) -> Dict[str, Any]:
+    p = Path(path)
+    out: Dict[str, Any] = {}
+
+    try:
+        st = p.stat()
+        out["SourceFile"] = str(p)
+        out["FileName"] = p.name
+        out["Directory"] = str(p.parent)
+        out["FileSize"] = int(st.st_size)
+        out["FileModifyDateUTC"] = _iso_utc(st.st_mtime)
+        out["FileAccessDateUTC"] = _iso_utc(st.st_atime)
+        out["FileInodeChangeDateUTC"] = _iso_utc(getattr(st, "st_ctime", st.st_mtime))
+    except Exception as e:
+        out["FileError"] = str(e)
+
+    ext = p.suffix.lower()
+    out["FileTypeExtension"] = ext.lstrip(".")
+    mt, _ = mimetypes.guess_type(str(p))
+    if mt:
+        out["MIMEType"] = mt
+
+    out["PythonVersion"] = sys.version.replace("\n", " ")
+    out["Platform"] = platform.platform()
+
+    img = None
+    try:
+        img = Image.open(str(p))
+        img.load()
+        out["ImageFormat"] = getattr(img, "format", None)
+        out["ImageMode"] = getattr(img, "mode", None)
+        sz = getattr(img, "size", None)
+        if sz and isinstance(sz, tuple) and len(sz) == 2:
+            out["ImageWidth"] = int(sz[0])
+            out["ImageHeight"] = int(sz[1])
+            out["ImageSize"] = f"{int(sz[0])}x{int(sz[1])}"
+    except Exception as e:
+        out["ImageOpenError"] = str(e)
+        return out
+
+    # PIL info blobs (EXIF/XMP/ICC/IPTC etc.)
+    try:
+        info = getattr(img, "info", {}) or {}
+        if "exif" in info and isinstance(info["exif"], (bytes, bytearray)):
+            b = bytes(info["exif"])
+            out["EXIFBlob"] = {"len": len(b), "base64": _safe_b64(b)}
+        if "xmp" in info:
+            x = info["xmp"]
+            if isinstance(x, (bytes, bytearray)):
+                out["XMP"] = {"len": len(x), "base64": _safe_b64(bytes(x))}
+            else:
+                out["XMP"] = _to_jsonable(x)
+        if "icc_profile" in info and isinstance(info["icc_profile"], (bytes, bytearray)):
+            b = bytes(info["icc_profile"])
+            out["ICCProfile"] = {"len": len(b), "base64": _safe_b64(b)}
+    except Exception:
+        pass
+
+    # Standard EXIF via PIL
+    exif_out: Dict[str, Any] = {}
+    gps_out: Dict[str, Any] = {}
+    try:
+        exif = img.getexif()
+        if exif:
+            for tag_id, val in exif.items():
+                name = _exif_tag_name(int(tag_id))
+                if name == "GPSInfo" and isinstance(val, dict):
+                    for gk, gv in val.items():
+                        gps_out[_gps_tag_name(int(gk))] = _to_jsonable(gv)
+                else:
+                    exif_out[name] = _to_jsonable(val)
+    except Exception as e:
+        out["EXIFReadError"] = str(e)
+
+    if gps_out:
+        gps_out.update(_gps_to_decimal(gps_out))
+
+    if exif_out:
+        out["EXIF"] = exif_out
+    if gps_out:
+        out["GPS"] = gps_out
+
+    # HEIC container metadata (optional, best-effort)
+    try:
+        if ext in (".heic", ".heif"):
+            from pillow_heif import read_heif  # type: ignore
+            hf = read_heif(str(p))
+            meta_list = []
+            md = getattr(hf, "metadata", None)
+            if md:
+                for m in md:
+                    try:
+                        mtype = getattr(m, "type", None)
+                        mdata = getattr(m, "data", None)
+                        if isinstance(mdata, (bytes, bytearray)):
+                            meta_list.append({"type": str(mtype), "len": len(mdata), "base64": _safe_b64(bytes(mdata))})
+                        else:
+                            meta_list.append({"type": str(mtype), "data": _to_jsonable(mdata)})
+                    except Exception:
+                        continue
+            if meta_list:
+                out["HEICMetadata"] = meta_list
+    except Exception:
+        pass
+
+    return out
 
 
 def main() -> int:
@@ -77,7 +311,6 @@ def main() -> int:
     if len(sys.argv) == 1:
         ap.print_help()
         print("Этот скрипт запускается из Qt-приложения vk_qt_app.exe")
-        print("python runner.py --task cluster --cluster-id 1 --input ПУТЬ_К_КАРТИНКЕ --output-dir ПУТЬ_К_out --device auto --config ПУТЬ_К_default_config.json --result-json ПУТЬ_К_result.json")
         return 0
 
     if any(a in ("-h", "--help") for a in sys.argv[1:]):
@@ -104,7 +337,7 @@ def main() -> int:
         with redirect_stdout(out_tee), redirect_stderr(err_tee):
             if args.task == "cluster":
                 if args.cluster_id not in (1, 2, 3, 4):
-                    raise SystemExit("cluster-id must be 1..4")
+                    raise ValueError("cluster-id must be 1..4")
 
                 mod_name = f"prototypes.cluster_{args.cluster_id}"
                 mod = __import__(mod_name, fromlist=["run"])
@@ -114,7 +347,8 @@ def main() -> int:
                     cfg=cfg,
                     device_mode=args.device
                 )
-            else:
+
+            elif args.task == "distance_full":
                 from full_distance.full_distance import run as run_full
                 module_result = run_full(
                     image_path=args.input,
@@ -123,15 +357,25 @@ def main() -> int:
                     device_mode=args.device
                 )
 
-    except SystemExit:
-        raise
+            else:  # exif
+                module_result = {
+                    "module_id": "exif_full",
+                    "exif": extract_exif_full(args.input)
+                }
+
+    except SystemExit as e:
+        exit_code = int(e.code) if isinstance(getattr(e, "code", None), int) else 1
+        err_obj = {
+            "type": "SystemExit",
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        }
     except Exception as e:
         exit_code = 1
-        tb = traceback.format_exc()
         err_obj = {
             "type": type(e).__name__,
             "message": str(e),
-            "traceback": tb,
+            "traceback": traceback.format_exc(),
         }
 
     finished_ms = int(time.time() * 1000)

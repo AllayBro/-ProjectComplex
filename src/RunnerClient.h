@@ -3,7 +3,7 @@
 #include <QProcess>
 #include <QString>
 #include <QStringList>
-
+#include <QFile>
 #include "AppConfig.h"
 
 struct ModuleResult;
@@ -12,6 +12,10 @@ class RunnerClient : public QObject {
     Q_OBJECT
 public:
     explicit RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent = nullptr);
+    ~RunnerClient() override;
+
+    bool isRunning() const;
+    void stop();
 
     void appendLog(const QString& s);
 
@@ -45,8 +49,18 @@ private:
     QProcess* m_proc = nullptr;
     QString m_resultJsonPath;
 
+    QString m_currentOutDir;
+    QString m_lastCmdLine;
+
+    QFile m_runLog;
+    QString m_runLogPath;
+
+    bool m_cancelRequested = false;
+    bool m_finishEmitted = false;
+
     QString m_stdoutBuf;
     QString m_stderrBuf;
+
 
     void startProcess(const QStringList& args);
 

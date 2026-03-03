@@ -32,6 +32,33 @@ static QString uiDefaultOutDirFull() {
     return d;
 }
 
+static QString normPathSlash(const QString& p) {
+    return QDir::cleanPath(QDir::fromNativeSeparators(p));
+}
+
+static bool isPathInsideDirOrUnknown(const QString& filePath, const QString& dirPath) {
+    if (filePath.isEmpty() || dirPath.isEmpty()) return false;
+
+    QString d = QDir(dirPath).canonicalPath();
+    if (d.isEmpty()) d = QFileInfo(dirPath).absoluteFilePath();
+
+    QString f = QFileInfo(filePath).canonicalFilePath();
+    if (f.isEmpty()) f = QFileInfo(filePath).absoluteFilePath();
+
+    if (d.isEmpty() || f.isEmpty()) return true; // не удалось нормализовать, не блокируем
+
+    d = normPathSlash(d);
+    f = normPathSlash(f);
+
+    if (!d.endsWith('/')) d += '/';
+
+#ifdef Q_OS_WIN
+    return f.startsWith(d, Qt::CaseInsensitive);
+#else
+    return f.startsWith(d);
+#endif
+}
+
 FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QWidget* parent)
     : QWidget(parent), m_cfg(cfg), m_appDir(appDir) {
 
@@ -157,9 +184,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
         );
         if (p.isEmpty()) return;
 
-        const QString canonDir = QDir(ydir).canonicalPath();
-        const QString canonFile = QFileInfo(p).canonicalFilePath();
-        if (!canonDir.isEmpty() && !canonFile.isEmpty() && !canonFile.startsWith(canonDir + QDir::separator())) {
+        if (!isPathInsideDirOrUnknown(p, ydir)) {
             m_view->appendLog("Ошибка: модель должна быть внутри папки: " + ydir);
             return;
         }
@@ -184,6 +209,10 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
     });
 
     connect(m_run, &QPushButton::clicked, this, [this]{
+        if (m_runner && m_runner->isRunning()) {
+            m_view->appendLog("Уже выполняется. Дождитесь завершения или остановите запуск.");
+            return;
+        }
         const QString in = m_input->text().trimmed();
         const QString dev = m_device->currentText();
 
@@ -207,9 +236,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
         }
 
         const QString ydir = yoloDirAbs();
-        const QString canonDir = QDir(ydir).canonicalPath();
-        const QString canonFile = QFileInfo(yolo).canonicalFilePath();
-        if (!canonDir.isEmpty() && !canonFile.isEmpty() && !canonFile.startsWith(canonDir + QDir::separator())) {
+        if (!isPathInsideDirOrUnknown(yolo, ydir)) {
             m_view->appendLog("Ошибка: модель должна быть внутри папки: " + ydir);
             return;
         }
@@ -273,6 +300,13 @@ QString FullDistanceTab::currentYoloModelPath() const {
 
 void FullDistanceTab::bindRunner() {
     connect(m_runner, &RunnerClient::started, this, [this]{
+        m_browse->setEnabled(false);
+        m_input->setEnabled(false);
+        m_yoloModel->setEnabled(false);
+        m_browseYolo->setEnabled(false);
+        m_device->setEnabled(false);
+        m_run->setEnabled(false);
+
         m_view->appendLog("Запуск...");
     });
 
@@ -281,10 +315,24 @@ void FullDistanceTab::bindRunner() {
     });
 
     connect(m_runner, &RunnerClient::finishedError, this, [this](const QString& e){
+        m_browse->setEnabled(true);
+        m_input->setEnabled(true);
+        m_yoloModel->setEnabled(true);
+        m_browseYolo->setEnabled(true);
+        m_device->setEnabled(true);
+        m_run->setEnabled(true);
+
         m_view->appendLog("Ошибка: " + e);
     });
 
     connect(m_runner, &RunnerClient::finishedOk, this, [this](const ModuleResult& r){
+        m_browse->setEnabled(true);
+        m_input->setEnabled(true);
+        m_yoloModel->setEnabled(true);
+        m_browseYolo->setEnabled(true);
+        m_device->setEnabled(true);
+        m_run->setEnabled(true);
+
         m_view->setResult(r);
         emit resultReady(m_lastRunImagePath, r);
     });

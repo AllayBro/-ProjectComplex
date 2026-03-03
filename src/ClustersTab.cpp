@@ -26,6 +26,33 @@ static QString uiDefaultImagesDirClusters() {
     return d;
 }
 
+static QString normPathSlash(const QString& p) {
+    return QDir::cleanPath(QDir::fromNativeSeparators(p));
+}
+
+static bool isPathInsideDirOrUnknown(const QString& filePath, const QString& dirPath) {
+    if (filePath.isEmpty() || dirPath.isEmpty()) return false;
+
+    QString d = QDir(dirPath).canonicalPath();
+    if (d.isEmpty()) d = QFileInfo(dirPath).absoluteFilePath();
+
+    QString f = QFileInfo(filePath).canonicalFilePath();
+    if (f.isEmpty()) f = QFileInfo(filePath).absoluteFilePath();
+
+    if (d.isEmpty() || f.isEmpty()) return true; // не удалось нормализовать, не блокируем
+
+    d = normPathSlash(d);
+    f = normPathSlash(f);
+
+    if (!d.endsWith('/')) d += '/';
+
+#ifdef Q_OS_WIN
+    return f.startsWith(d, Qt::CaseInsensitive);
+#else
+    return f.startsWith(d);
+#endif
+}
+
 
 ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent)
     : QWidget(parent), m_cfg(cfg), m_appDir(appDir) {
@@ -156,9 +183,7 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         );
         if (p.isEmpty()) return;
 
-        const QString canonDir = QDir(ydir).canonicalPath();
-        const QString canonFile = QFileInfo(p).canonicalFilePath();
-        if (!canonDir.isEmpty() && !canonFile.isEmpty() && !canonFile.startsWith(canonDir + QDir::separator())) {
+        if (!isPathInsideDirOrUnknown(p, ydir)) {
             m_view->logEdit()->append("Ошибка: модель должна быть внутри папки: " + ydir);
             return;
         }
@@ -184,6 +209,10 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     for (int i = 0; i < m_clusterButtons.size(); ++i) {
         const int clusterId = m_cfg.clusters[i].clusterId;
         connect(m_clusterButtons[i], &QPushButton::clicked, this, [this, clusterId] {
+            if (m_runner && m_runner->isRunning()) {
+                m_view->logEdit()->append("Уже выполняется. Дождитесь завершения или остановите запуск.");
+                return;
+            }
             const QString in = m_input->text().trimmed();
             const QString dev = m_device->currentText();
 
@@ -201,9 +230,7 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             }
 
             const QString ydir = yoloDirAbs();
-            const QString canonDir = QDir(ydir).canonicalPath();
-            const QString canonFile = QFileInfo(yolo).canonicalFilePath();
-            if (!canonDir.isEmpty() && !canonFile.isEmpty() && !canonFile.startsWith(canonDir + QDir::separator())) {
+            if (!isPathInsideDirOrUnknown(yolo, ydir)) {
                 m_view->logEdit()->append("Ошибка: модель должна быть внутри папки: " + ydir);
                 return;
             }
@@ -258,6 +285,13 @@ QString ClustersTab::currentYoloModelPath() const {
 
 void ClustersTab::bindRunner() {
     connect(m_runner, &RunnerClient::started, this, [this] {
+        m_browse->setEnabled(false);
+        m_input->setEnabled(false);
+        m_yoloModel->setEnabled(false);
+        m_browseYolo->setEnabled(false);
+        m_device->setEnabled(false);
+        for (auto* b : m_clusterButtons) b->setEnabled(false);
+
         m_view->logEdit()->append("Запуск...");
     });
 
@@ -266,10 +300,24 @@ void ClustersTab::bindRunner() {
     });
 
     connect(m_runner, &RunnerClient::finishedError, this, [this](const QString& e) {
+        m_browse->setEnabled(true);
+        m_input->setEnabled(true);
+        m_yoloModel->setEnabled(true);
+        m_browseYolo->setEnabled(true);
+        m_device->setEnabled(true);
+        for (auto* b : m_clusterButtons) b->setEnabled(true);
+
         m_view->logEdit()->append("Ошибка: " + e);
     });
 
     connect(m_runner, &RunnerClient::finishedOk, this, [this](const ModuleResult& r) {
+        m_browse->setEnabled(true);
+        m_input->setEnabled(true);
+        m_yoloModel->setEnabled(true);
+        m_browseYolo->setEnabled(true);
+        m_device->setEnabled(true);
+        for (auto* b : m_clusterButtons) b->setEnabled(true);
+
         m_view->setResult(r);
         emit resultReady(m_lastRunImagePath, r);
     });
