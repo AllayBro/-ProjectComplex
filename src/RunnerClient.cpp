@@ -17,7 +17,7 @@
 #include <QMap>
 #include <QtMath>
 #include <cstring>
-
+#include <QStandardPaths>
 
 static QString quoteForLog(QString s) {
     if (s.contains('\"')) s.replace('\"', "\\\"");
@@ -47,17 +47,55 @@ static QString exitStatusToText(QProcess::ExitStatus s) {
 
 
 
-static bool readJsonObjectFile(const QString& path, QJsonObject& out, QString& err) {
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) { err = "Cannot open json: " + path; return false; }
+static QString tempBaseDir() {
+    QString d = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (d.isEmpty()) d = QDir::tempPath();
+    if (d.isEmpty()) d = QDir::homePath();
+    return d;
+}
 
-    QJsonParseError pe;
-    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
-    if (pe.error != QJsonParseError::NoError) { err = "JSON parse error in " + path + ": " + pe.errorString(); return false; }
-    if (!doc.isObject()) { err = "JSON is not object: " + path; return false; }
-
-    out = doc.object();
+static bool ensureEmptyDir(const QString& dirPath, QString& err) {
+    QDir d(dirPath);
+    if (d.exists()) {
+        if (!d.removeRecursively()) {
+            err = "Cannot clear temp_dir: " + dirPath;
+            return false;
+        }
+    }
+    if (!QDir().mkpath(dirPath)) {
+        err = "Cannot create temp_dir: " + dirPath;
+        return false;
+    }
     return true;
+}
+
+static QString makeWorkDir(const QString& subDir, QString& err) {
+    const QString root = QDir(tempBaseDir()).filePath("vk_qt_app_work");
+    const QString full = QDir(root).filePath(subDir);
+    if (!ensureEmptyDir(full, err)) return {};
+    return full;
+}
+
+static QString canonDirPath(const QString& p) {
+    QString c = QDir(p).canonicalPath();
+    if (c.isEmpty()) c = QDir(p).absolutePath();
+    return QDir::cleanPath(c);
+}
+
+static bool isInsideDir(const QString& child, const QString& parent) {
+    const QString c = canonDirPath(child);
+    const QString p = canonDirPath(parent);
+    if (c.isEmpty() || p.isEmpty()) return false;
+    if (QString::compare(c, p, Qt::CaseInsensitive) == 0) return true;
+    const QString pref = p + QDir::separator();
+    return c.startsWith(pref, Qt::CaseInsensitive);
+}
+
+static void cleanupWorkDirIfTemp(const QString& dirPath) {
+    if (dirPath.trimmed().isEmpty()) return;
+    const QString root = QDir(tempBaseDir()).filePath("vk_qt_app_work");
+    if (!isInsideDir(dirPath, root)) return;
+    QDir(dirPath).removeRecursively();
 }
 
 static bool writeJsonObjectFile(const QString& path, const QJsonObject& obj, QString& err) {
@@ -69,17 +107,40 @@ static bool writeJsonObjectFile(const QString& path, const QJsonObject& obj, QSt
     return true;
 }
 
-static void deepMergeInto(QJsonObject& dst, const QJsonObject& src) {
-    for (auto it = src.begin(); it != src.end(); ++it) {
-        const QString k = it.key();
-        const QJsonValue sv = it.value();
+static bool readJsonObjectFile(const QString& path, QJsonObject& out, QString& err) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        err = "Cannot open json: " + path;
+        return false;
+    }
+    const QByteArray data = f.readAll();
 
-        if (sv.isObject() && dst.value(k).isObject()) {
-            QJsonObject dchild = dst.value(k).toObject();
-            deepMergeInto(dchild, sv.toObject());
-            dst.insert(k, dchild);
+    QJsonParseError pe;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &pe);
+    if (pe.error != QJsonParseError::NoError) {
+        err = "JSON parse error in " + path + ": " + pe.errorString();
+        return false;
+    }
+    if (!doc.isObject()) {
+        err = "JSON is not object: " + path;
+        return false;
+    }
+
+    out = doc.object();
+    return true;
+}
+
+static void deepMergeInto(QJsonObject& target, const QJsonObject& patch) {
+    for (auto it = patch.begin(); it != patch.end(); ++it) {
+        const QString key = it.key();
+        const QJsonValue val = it.value();
+
+        if (val.isObject() && target.value(key).isObject()) {
+            QJsonObject nested = target.value(key).toObject();
+            deepMergeInto(nested, val.toObject());
+            target.insert(key, nested);
         } else {
-            dst.insert(k, sv);
+            target.insert(key, val);
         }
     }
 }
@@ -101,40 +162,6 @@ static void consumeTextLines(QString& buffer, QString chunk, const std::function
 static void flushTail(QString& buffer, const std::function<void(const QString&)>& emitFn) {
     if (!buffer.trimmed().isEmpty()) emitFn(buffer);
     buffer.clear();
-}
-
-static bool resetDirIfUnderRunRoot(const QString& appDir, const QString& outDir, QString& err) {
-    const QString runRootAbs = QDir(appDir).filePath("run");
-
-    const QString rootCanon = QDir(runRootAbs).canonicalPath();
-    QString outCanon = QDir(outDir).canonicalPath();
-
-    const QString root = rootCanon.isEmpty() ? QDir(runRootAbs).absolutePath() : rootCanon;
-    const QString out  = outCanon.isEmpty() ? QDir(outDir).absolutePath() : outCanon;
-
-    const bool underRun = (!root.isEmpty()) && (out == root || out.startsWith(root + QDir::separator()));
-
-    if (underRun) {
-        QDir d(outDir);
-        if (d.exists()) {
-            if (!d.removeRecursively()) {
-                err = "Cannot clear run_dir: " + outDir;
-                return false;
-            }
-        }
-        if (!QDir().mkpath(outDir)) {
-            err = "Cannot create run_dir: " + outDir;
-            return false;
-        }
-        return true;
-    }
-
-    if (!QDir().mkpath(outDir)) {
-        err = "Cannot create output_dir: " + outDir;
-        return false;
-    }
-
-    return true;
 }
 
 RunnerClient::RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent)
@@ -159,11 +186,10 @@ void RunnerClient::runCluster(int clusterId,
     const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
     QString outErr;
-    if (!resetDirIfUnderRunRoot(m_appDir, outputDir, outErr)) { emit finishedError(outErr); return; }
+    const QString workDir = makeWorkDir(QString("cluster_%1").arg(clusterId), outErr);
+    if (workDir.isEmpty()) { emit finishedError(outErr); return; }
 
-    const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    m_resultJsonPath = QDir(outputDir).filePath(QString("result_cluster_%1_%2.json").arg(clusterId).arg(ts));
-
+    m_resultJsonPath = QDir(workDir).filePath("result.json");
     QString yoloAbs = yoloModelPath.trimmed();
     if (yoloAbs.isEmpty()) { emit finishedError("Не выбрана модель YOLO."); return; }
     if (!QFileInfo(yoloAbs).isAbsolute()) yoloAbs = absPath(m_appDir, yoloAbs);
@@ -178,7 +204,7 @@ void RunnerClient::runCluster(int clusterId,
     patch.insert("yolo_model_path", yoloAbs);
     deepMergeInto(cfgObj, patch);
 
-    const QString patchedCfg = QDir(outputDir).filePath(QString("run_cfg_cluster_%1_%2.json").arg(clusterId).arg(ts));
+    const QString patchedCfg = QDir(workDir).filePath("run_cfg.json");
     if (!writeJsonObjectFile(patchedCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QStringList args;
@@ -186,12 +212,12 @@ void RunnerClient::runCluster(int clusterId,
          << "--task" << "cluster"
          << "--cluster-id" << QString::number(clusterId)
          << "--input" << imagePath
-         << "--output-dir" << outputDir
+         << "--output-dir" << workDir
          << "--device" << deviceMode
          << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
-    m_currentOutDir = outputDir;
+    m_currentOutDir = workDir;
     startProcess(args);
 }
 
@@ -203,11 +229,10 @@ void RunnerClient::runFullDistance(const QString& imagePath,
     const QString basePyCfg = absPath(m_appDir, m_cfg.pythonConfigJson);
 
     QString outErr;
-    if (!resetDirIfUnderRunRoot(m_appDir, outputDir, outErr)) { emit finishedError(outErr); return; }
+    const QString workDir = makeWorkDir("full_distance", outErr);
+    if (workDir.isEmpty()) { emit finishedError(outErr); return; }
 
-    const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    m_resultJsonPath = QDir(outputDir).filePath(QString("result_full_%1.json").arg(ts));
-
+    m_resultJsonPath = QDir(workDir).filePath("result.json");
     QString yoloAbs = yoloModelPath.trimmed();
     if (yoloAbs.isEmpty()) { emit finishedError("Не выбрана модель YOLO."); return; }
     if (!QFileInfo(yoloAbs).isAbsolute()) yoloAbs = absPath(m_appDir, yoloAbs);
@@ -222,19 +247,19 @@ void RunnerClient::runFullDistance(const QString& imagePath,
     patch.insert("yolo_model_path", yoloAbs);
     deepMergeInto(cfgObj, patch);
 
-    const QString patchedCfg = QDir(outputDir).filePath(QString("run_cfg_full_%1.json").arg(ts));
+    const QString patchedCfg = QDir(workDir).filePath("run_cfg.json");
     if (!writeJsonObjectFile(patchedCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QStringList args;
     args << runner
          << "--task" << "distance_full"
          << "--input" << imagePath
-         << "--output-dir" << outputDir
+         << "--output-dir" << workDir
          << "--device" << deviceMode
          << "--config" << patchedCfg
          << "--result-json" << m_resultJsonPath;
 
-    m_currentOutDir = outputDir;
+    m_currentOutDir = workDir;
     startProcess(args);
 }
 void RunnerClient::startProcess(const QStringList& args) {
@@ -264,17 +289,8 @@ void RunnerClient::startProcess(const QStringList& args) {
     if (!runnerDir.isEmpty() && QDir(runnerDir).exists()) m_proc->setWorkingDirectory(runnerDir);
     else m_proc->setWorkingDirectory(m_appDir);
 
-    // Лог процесса в output-dir
     m_runLog.close();
     m_runLogPath.clear();
-    if (!m_currentOutDir.trimmed().isEmpty()) {
-        const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-        m_runLogPath = QDir(m_currentOutDir).filePath(QString("process_%1.log").arg(ts));
-        m_runLog.setFileName(m_runLogPath);
-        if (!m_runLog.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            emit logLine("WARNING: cannot open run log file: " + m_runLogPath);
-        }
-    }
 
     m_proc->setProgram(m_cfg.pythonExe);
 
@@ -320,14 +336,12 @@ void RunnerClient::startProcess(const QStringList& args) {
 void RunnerClient::onReadyStdout() {
     if (!m_proc) return;
     const QByteArray b = m_proc->readAllStandardOutput();
-    if (m_runLog.isOpen() && !b.isEmpty()) { m_runLog.write(b); m_runLog.flush(); }
     consumeTextLines(m_stdoutBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
 void RunnerClient::onReadyStderr() {
     if (!m_proc) return;
     const QByteArray b = m_proc->readAllStandardError();
-    if (m_runLog.isOpen() && !b.isEmpty()) { m_runLog.write(b); m_runLog.flush(); }
     consumeTextLines(m_stderrBuf, QString::fromUtf8(b), [this](const QString& line){ emit logLine(line); });
 }
 
@@ -444,7 +458,8 @@ bool RunnerClient::writeDetectionsCsv(const QString& outDir, ModuleResult& r, QS
     return true;
 }
 
-void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
+void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status)
+{
     flushTail(m_stdoutBuf, [this](const QString& line){ emit logLine(line); });
     flushTail(m_stderrBuf, [this](const QString& line){ emit logLine(line); });
 
@@ -454,9 +469,12 @@ void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
     QString perr;
     const bool hasResult = QFileInfo(m_resultJsonPath).exists() && loadResultJson(m_resultJsonPath, r, perr);
 
+    const QString outToCleanup = m_currentOutDir;
+    m_currentOutDir.clear();
+
     if (hasResult) {
         emit finishedOk(r);
-        // Если результат есть, считаем выполнение успешным даже при ненулевом exitCode.
+        cleanupWorkDirIfTemp(outToCleanup);
         return;
     }
 
@@ -464,11 +482,14 @@ void RunnerClient::onFinished(int exitCode, QProcess::ExitStatus status) {
         QString e = QString("Process failed: exitCode=%1 status=%2").arg(exitCode).arg((int)status);
         if (!m_lastCmdLine.isEmpty()) e += " | " + m_lastCmdLine;
         emit finishedError(e);
+        cleanupWorkDirIfTemp(outToCleanup);
         return;
     }
 
     emit finishedError(perr.isEmpty() ? "No result.json produced" : perr);
+    cleanupWorkDirIfTemp(outToCleanup);
 }
+
 RunnerClient::~RunnerClient() {
     stop();
     if (m_proc && m_proc->state() != QProcess::NotRunning) {

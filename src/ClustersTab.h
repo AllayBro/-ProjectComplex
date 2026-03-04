@@ -6,7 +6,8 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QVector>
-
+#include <QImage>
+#include <QJsonObject>
 #include "AppConfig.h"
 #include "ModelTypes.h"
 
@@ -45,6 +46,9 @@ private:
     QString yoloDirAbs() const;
     void reloadYoloModels();
     QString currentYoloModelPath() const;
+
+    void applyPreview(const QString& imagePath);
+    bool runPreviewTaskRaw(const QString& inputPath, QImage& outImage, QJsonObject& outExifRoot, QString& err);
 
     void bindRunner();
 };

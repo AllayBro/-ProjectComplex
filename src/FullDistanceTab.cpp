@@ -15,6 +15,10 @@
 #include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QFrame>
+#include <QProcess>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QFile>
 
 static QString uiIniPathFull() {
     return QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
@@ -89,6 +93,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
     m_run->setMinimumHeight(44);
 
     m_view = new ResultView();
+    m_view->setPythonExe(m_cfg.pythonExe);
 
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
@@ -117,7 +122,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
         if (!lastIn.isEmpty() && QFileInfo(lastIn).exists()) {
             QSignalBlocker b(m_input);
             m_input->setText(lastIn);
-            m_view->setPreviewImage(lastIn);
+            applyPreview(lastIn);
             emit imageSelected(lastIn);
         }
     }
@@ -132,7 +137,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
             QFileInfo fi(cur);
             if (fi.exists()) startDir = fi.absolutePath();
         }
-        const QString out = QDir(QDir(m_appDir).filePath("run")).filePath("full_distance");
+
 
         const QString p = QFileDialog::getOpenFileName(
             this,
@@ -148,7 +153,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 
             QSignalBlocker b(m_input);
             m_input->setText(p);
-            m_view->setPreviewImage(p);
+            applyPreview(p);
             emit imageSelected(p);
         }
     });
@@ -165,7 +170,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
         s.setValue("ui/last_image_dir", fi.absolutePath());
         s.sync();
 
-        m_view->setPreviewImage(fi.absoluteFilePath());
+        applyPreview(fi.absoluteFilePath());
         emit imageSelected(fi.absoluteFilePath());
     });
 
@@ -218,11 +223,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 
         QSettings s(uiIniPathFull(), QSettings::IniFormat);
 
-        QString out = s.value("ui/last_output_dir", uiDefaultOutDirFull()).toString();
-        if (out.isEmpty()) {
-            out = uiDefaultOutDirFull();
-            s.setValue("ui/last_output_dir", out);
-        }
+        const QString out;
 
         const QString yolo = currentYoloModelPath();
 
@@ -296,6 +297,124 @@ QString FullDistanceTab::currentYoloModelPath() const {
     }
 
     return fi.absoluteFilePath();
+}
+static QString absPathLocalFull(const QString& appDir, const QString& relOrAbs) {
+    QFileInfo fi(relOrAbs);
+    if (fi.isAbsolute()) return fi.absoluteFilePath();
+    return QDir(appDir).filePath(relOrAbs);
+}
+
+static QString tempBaseDirLocalFull() {
+    QString d = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (d.isEmpty()) d = QDir::tempPath();
+    if (d.isEmpty()) d = QDir::homePath();
+    return d;
+}
+
+bool FullDistanceTab::runPreviewTaskRaw(const QString& inputPath, QImage& outImage, QJsonObject& outExifRoot, QString& err) {
+    outImage = QImage();
+    outExifRoot = QJsonObject();
+    err.clear();
+
+    const QString py = m_cfg.pythonExe.trimmed().isEmpty() ? "python" : m_cfg.pythonExe.trimmed();
+    const QString runner = absPathLocalFull(m_appDir, m_cfg.runnerScript);
+    const QString basePyCfg = absPathLocalFull(m_appDir, m_cfg.pythonConfigJson);
+
+    if (!QFileInfo(runner).exists()) { err = "runner.py не найден: " + runner; return false; }
+    if (!QFileInfo(basePyCfg).exists()) { err = "python config не найден: " + basePyCfg; return false; }
+    if (!QFileInfo(inputPath).exists()) { err = "input не найден: " + inputPath; return false; }
+
+    const QString workDir = QDir(tempBaseDirLocalFull()).filePath("vk_qt_app_preview_raw");
+    QDir wd(workDir);
+    if (wd.exists() && !wd.removeRecursively()) { err = "Не удалось очистить temp preview dir: " + workDir; return false; }
+    if (!QDir().mkpath(workDir)) { err = "Не удалось создать temp preview dir: " + workDir; return false; }
+
+    const QString resultJson = QDir(workDir).filePath("preview.json");
+
+    QProcess proc;
+    QStringList args;
+    args << "-u" << "-X" << "faulthandler"
+         << runner
+         << "--task" << "preview"
+         << "--input" << inputPath
+         << "--output-dir" << workDir
+         << "--device" << (m_device ? m_device->currentText() : QString("auto"))
+         << "--config" << basePyCfg
+         << "--result-json" << resultJson;
+
+    proc.start(py, args);
+    if (!proc.waitForFinished(-1)) {
+        err = "preview: процесс не завершился";
+        wd.removeRecursively();
+        return false;
+    }
+
+    if (!QFileInfo(resultJson).exists()) {
+        err = "preview: result_json не создан. stderr=" + QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        wd.removeRecursively();
+        return false;
+    }
+
+    QFile f(resultJson);
+    if (!f.open(QIODevice::ReadOnly)) { err = "preview: не открыть result_json: " + resultJson; wd.removeRecursively(); return false; }
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
+        err = "preview: JSON parse error: " + pe.errorString();
+        wd.removeRecursively();
+        return false;
+    }
+
+    const QJsonObject root = doc.object();
+    const QJsonObject mod = root.value("module").toObject();
+
+    const int w = mod.value("preview_w").toInt(0);
+    const int h = mod.value("preview_h").toInt(0);
+    const int stride = mod.value("preview_stride").toInt(0);
+    const QString fmt = mod.value("preview_format").toString().trimmed();
+    const QString rawPath = mod.value("preview_raw_path").toString().trimmed();
+
+    if (w <= 0 || h <= 0 || stride <= 0) { err = "preview: неверные размеры"; wd.removeRecursively(); return false; }
+    if (fmt != "RGBA8888") { err = "preview: неподдерживаемый формат: " + fmt; wd.removeRecursively(); return false; }
+    if (rawPath.isEmpty() || !QFileInfo(rawPath).exists()) { err = "preview: raw файл не найден: " + rawPath; wd.removeRecursively(); return false; }
+
+    QFile rf(rawPath);
+    if (!rf.open(QIODevice::ReadOnly)) { err = "preview: не открыть raw: " + rawPath; wd.removeRecursively(); return false; }
+    const QByteArray bytes = rf.readAll();
+    rf.close();
+
+    const qint64 need = (qint64)stride * (qint64)h;
+    if (bytes.size() < need) { err = "preview: raw меньше ожидаемого"; wd.removeRecursively(); return false; }
+
+    QImage img((const uchar*)bytes.constData(), w, h, stride, QImage::Format_RGBA8888);
+    outImage = img.copy();
+
+    outExifRoot = root.value("exif").toObject();
+
+    wd.removeRecursively();
+    return !outImage.isNull();
+}
+
+void FullDistanceTab::applyPreview(const QString& imagePath) {
+    const QString p = imagePath.trimmed();
+    if (p.isEmpty() || !QFileInfo(p).exists()) return;
+
+    QPixmap pm(p);
+    if (!pm.isNull()) {
+        m_view->setPreviewImage(p);
+        return;
+    }
+
+    QImage img;
+    QJsonObject exifRoot;
+    QString err;
+    if (!runPreviewTaskRaw(p, img, exifRoot, err)) {
+        m_view->setPreviewImage(p);
+        if (m_view && m_view->logEdit()) m_view->logEdit()->append("HEIC/HEIF preview error: " + err);
+        return;
+    }
+
+    m_view->setPreviewFromRaw(p, img, exifRoot);
 }
 
 void FullDistanceTab::bindRunner() {

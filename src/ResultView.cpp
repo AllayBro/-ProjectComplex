@@ -20,6 +20,10 @@
 #include <QtSql/QSqlDatabase>
 #include <QtSql/QSqlQuery>
 #include <QtSql/QSqlError>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QImageWriter>
+#include <QRegularExpression>
 
 #ifdef VK_WITH_QXLSX
 #include <QXlsx/xlsxdocument.h>
@@ -573,6 +577,11 @@ ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     connect(m_btnExportData, &QPushButton::clicked, this, &ResultView::onExportData);
 }
 
+void ResultView::setPythonExe(const QString& pythonExe) {
+    const QString v = pythonExe.trimmed();
+    m_pythonExe = v.isEmpty() ? "python" : v;
+}
+
 void ResultView::applyScaled(QLabel* lbl,
                              const QPixmap& src,
                              quint64& lastKey,
@@ -663,7 +672,9 @@ void ResultView::loadOriginal(const QString& path) {
     QPixmap pm(path);
     if (pm.isNull()) return;
 
+    pm.setDevicePixelRatio(1.0);
     m_srcOriginal = pm;
+    m_srcOriginal.setDevicePixelRatio(1.0);
 }
 void ResultView::setPreviewImage(const QString& originalPath) {
     m_originalPath = originalPath;
@@ -687,6 +698,62 @@ void ResultView::setPreviewImage(const QString& originalPath) {
     root.insert("file", extractAllJpegMetadataFlat(originalPath));
     m_lastResult.exif = root;
 
+    rebuildExifTable();
+}
+
+void ResultView::setPreviewFromRunner(const QString& originalPath, const QString& displayPath, const QJsonObject& exifRoot) {
+    m_originalPath = originalPath;
+
+    const QString p = displayPath.trimmed().isEmpty() ? originalPath : displayPath;
+    loadOriginal(p);
+
+    applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
+
+    m_srcResult = QPixmap();
+    applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
+
+    clearDynamicTableTabs();
+    if (m_tblDetections) { m_tblDetections->setRowCount(0); m_tblDetections->setColumnCount(0); }
+    if (m_tblExif) { m_tblExif->setRowCount(0); m_tblExif->setColumnCount(2); }
+
+    clearPlotTabs();
+
+    if (m_log) m_log->clear();
+    if (m_tabs) m_tabs->setCurrentWidget(m_log);
+
+    m_lastResult = ModuleResult();
+    m_hasResult = false;
+
+    m_lastResult.exif = exifRoot;
+    rebuildExifTable();
+}
+
+void ResultView::setPreviewFromRaw(const QString& originalPath, const QImage& preview, const QJsonObject& exifRoot) {
+    m_originalPath = originalPath;
+
+    QPixmap pm = QPixmap::fromImage(preview);
+    pm.setDevicePixelRatio(1.0);
+    m_srcOriginal = pm;
+    m_srcOriginal.setDevicePixelRatio(1.0);
+
+    applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
+
+    m_srcResult = QPixmap();
+    applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
+
+    clearDynamicTableTabs();
+    if (m_tblDetections) { m_tblDetections->setRowCount(0); m_tblDetections->setColumnCount(0); }
+    if (m_tblExif) { m_tblExif->setRowCount(0); m_tblExif->setColumnCount(2); }
+
+    clearPlotTabs();
+
+    if (m_log) m_log->clear();
+    if (m_tabs) m_tabs->setCurrentWidget(m_log);
+
+    m_lastResult = ModuleResult();
+    m_hasResult = false;
+
+    m_lastResult.exif = exifRoot;
     rebuildExifTable();
 }
 
@@ -807,7 +874,10 @@ void ResultView::renderResultPixmap() {
     }
 
     p.end();
-    m_srcResult = QPixmap::fromImage(img);
+    QPixmap pm = QPixmap::fromImage(img);
+    pm.setDevicePixelRatio(1.0);
+    m_srcResult = pm;
+    m_srcResult.setDevicePixelRatio(1.0);
 }
 
 void ResultView::setResult(const ModuleResult& r) {
@@ -1272,12 +1342,89 @@ void ResultView::onSaveImage() {
         return;
     }
 
-    const QString filter =
-        "PNG (*.png);;"
-        "JPG (*.jpg *.jpeg);;"
-        "BMP (*.bmp);;"
-        "WEBP (*.webp)";
+    QString inExt = QFileInfo(m_originalPath).suffix().toLower();
+    if (inExt == "jpeg") inExt = "jpg";
+    if (inExt.isEmpty()) inExt = "png";
 
+    QSet<QString> exts;
+    const QList<QByteArray> fmts = QImageWriter::supportedImageFormats();
+    for (const QByteArray& b : fmts) {
+        QString e = QString::fromLatin1(b).toLower().trimmed();
+        if (e.isEmpty()) continue;
+        if (e == "jpeg") e = "jpg";
+        if (e == "tif") e = "tiff";
+        exts.insert(e);
+    }
+
+    // HEIC/HEIF добавляем как поддержку “через Python” (даже если Qt сам не умеет)
+    exts.insert("heic");
+    exts.insert("heif");
+
+    auto patsFor = [](const QString& e) -> QStringList {
+        if (e == "jpg")  return {"*.jpg", "*.jpeg", "*.jpe", "*.jfif", "*.jif"};
+        if (e == "tiff") return {"*.tif", "*.tiff"};
+        if (e == "jp2")  return {"*.jp2", "*.j2k", "*.j2c", "*.jpx", "*.jpf"};
+        if (e == "heic") return {"*.heic"};
+        if (e == "heif") return {"*.heif"};
+        return { "*." + e };
+    };
+
+    auto titleFor = [](const QString& e) -> QString {
+        if (e == "jpg")  return "JPEG";
+        if (e == "png")  return "PNG";
+        if (e == "bmp")  return "BMP";
+        if (e == "webp") return "WEBP";
+        if (e == "tiff") return "TIFF";
+        if (e == "gif")  return "GIF";
+        if (e == "jp2")  return "JPEG 2000";
+        if (e == "ppm")  return "PPM";
+        if (e == "pgm")  return "PGM";
+        if (e == "pbm")  return "PBM";
+        if (e == "xpm")  return "XPM";
+        if (e == "xbm")  return "XBM";
+        if (e == "ico")  return "ICO";
+        if (e == "icns") return "ICNS";
+        if (e == "heic") return "HEIC";
+        if (e == "heif") return "HEIF";
+        return e.toUpper();
+    };
+
+    // порядок: сначала расширение входного файла (если есть), затем популярные, затем остальное
+    QStringList order;
+    if (exts.contains(inExt)) order << inExt;
+
+    const QStringList common = {
+        "png","jpg","bmp","webp","tiff","gif","jp2","ico","icns","ppm","pgm","pbm","xpm","xbm","heic","heif"
+    };
+    for (const QString& e : common) {
+        if (exts.contains(e) && !order.contains(e)) order << e;
+    }
+
+    QStringList rest = exts.values();
+    std::sort(rest.begin(), rest.end());
+    for (const QString& e : rest) {
+        if (!order.contains(e)) order << e;
+    }
+
+    // формируем фильтры: сначала “как вход”, потом “все”, потом остальные
+    QStringList filters;
+
+    if (!order.isEmpty()) {
+        const QString e0 = order.first();
+        filters << (titleFor(e0) + " (" + patsFor(e0).join(' ') + ")");
+    }
+
+    QStringList allPats;
+    for (const QString& e : order) allPats << patsFor(e);
+    filters << ("Все поддерживаемые (" + allPats.join(' ') + ")");
+
+    for (int i = 0; i < order.size(); ++i) {
+        const QString e = order[i];
+        const QString item = titleFor(e) + " (" + patsFor(e).join(' ') + ")";
+        if (!filters.contains(item)) filters << item;
+    }
+
+    const QString filter = filters.join(";;");
     const QString iniPath = QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
     QSettings st(iniPath, QSettings::IniFormat);
 
@@ -1288,10 +1435,10 @@ void ResultView::onSaveImage() {
             : QDir::homePath();
     }
 
-    QString suggestedFile = "result.png";
+    QString suggestedFile = "result." + inExt;
     if (QFileInfo(m_originalPath).exists()) {
         const QString base = QFileInfo(m_originalPath).completeBaseName();
-        if (!base.isEmpty()) suggestedFile = base + "_result.png";
+        if (!base.isEmpty()) suggestedFile = base + "_result." + inExt;
     }
 
     const QString suggestedPath = QDir(suggestedDir).filePath(suggestedFile);
@@ -1307,17 +1454,66 @@ void ResultView::onSaveImage() {
     if (path.isEmpty()) return;
 
     if (QFileInfo(path).suffix().isEmpty()) {
-        QString ext = ".png";
+        QString ext = "." + inExt;
+
         const QString f = selectedFilter.toLower();
-        if (f.contains("*.jpg") || f.contains("*.jpeg")) ext = ".jpg";
-        else if (f.contains("*.bmp")) ext = ".bmp";
-        else if (f.contains("*.webp")) ext = ".webp";
+        if (!f.startsWith("все поддерживаемые")) {
+            QRegularExpression re(R"(\*\.(\w+))");
+            QRegularExpressionMatch m = re.match(f);
+            if (m.hasMatch()) {
+                QString e = m.captured(1).toLower();
+                if (e == "jpeg") e = "jpg";
+                if (e == "tif") e = "tiff";
+                ext = "." + e;
+            }
+        }
         path += ext;
     }
 
-    if (!m_srcResult.save(path)) {
-        if (m_log) m_log->append("\nОшибка сохранения изображения: " + path);
-        return;
+    QString outExt = QFileInfo(path).suffix().toLower();
+    if (outExt == "jpeg") outExt = "jpg";
+
+    const bool wantHeif = (outExt == "heic" || outExt == "heif");
+
+    if (!wantHeif) {
+        if (!m_srcResult.save(path)) {
+            if (m_log) m_log->append("\nОшибка сохранения изображения: " + path);
+            return;
+        }
+    } else {
+        const QString tmpRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        const QString tmpDir = QDir(tmpRoot.isEmpty() ? QDir::tempPath() : tmpRoot).filePath("vk_qt_app_save");
+        QDir().mkpath(tmpDir);
+
+        const QString tmpPng = QDir(tmpDir).filePath("tmp_save_result.png");
+        if (!m_srcResult.save(tmpPng, "PNG")) {
+            if (m_log) m_log->append("\nОшибка подготовки PNG для HEIC/HEIF: " + tmpPng);
+            return;
+        }
+
+        const QString py = m_pythonExe.trimmed().isEmpty() ? "python" : m_pythonExe.trimmed();
+
+        const QString pyCode =
+            "import sys\n"
+            "from PIL import Image\n"
+            "from pillow_heif import register_heif_opener\n"
+            "register_heif_opener()\n"
+            "inp=sys.argv[1]\n"
+            "outp=sys.argv[2]\n"
+            "im=Image.open(inp)\n"
+            "im.load()\n"
+            "im.save(outp)\n";
+
+        QProcess proc;
+        proc.start(py, QStringList() << "-c" << pyCode << tmpPng << path);
+        if (!proc.waitForFinished(-1) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            const QString err = QString::fromUtf8(proc.readAllStandardError());
+            if (m_log) m_log->append("\nОшибка сохранения HEIC/HEIF через Python: " + err.trimmed());
+            QFile::remove(tmpPng);
+            return;
+        }
+
+        QFile::remove(tmpPng);
     }
 
     st.setValue("paths/last_save_image_dir", QFileInfo(path).absolutePath());

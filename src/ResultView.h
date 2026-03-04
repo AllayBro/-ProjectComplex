@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QVector>
+#include <QImage>
 
 #include "ModelTypes.h"
 
@@ -22,6 +23,8 @@ class ResultView : public QWidget {
 public:
     explicit ResultView(QWidget* parent = nullptr);
 
+    void setPreviewFromRaw(const QString& originalPath, const QImage& preview, const QJsonObject& exifRoot);
+
     QTextEdit* logEdit();
     void appendLog(const QString& s);
 
@@ -30,6 +33,9 @@ public:
 
     void setPreviewImage(const QString& originalPath);
     void setResult(const ModuleResult& r);
+
+    void setPreviewFromRunner(const QString& originalPath, const QString& displayPath, const QJsonObject& exifRoot);
+    void setPythonExe(const QString& pythonExe);
 
 private slots:
     void onSaveImage();
@@ -55,6 +61,7 @@ private:
     QPushButton* m_btnExportData = nullptr;
 
     QString m_originalPath;
+    QString m_pythonExe = "python";
     ModuleResult m_lastResult;
     bool m_hasResult = false;
 

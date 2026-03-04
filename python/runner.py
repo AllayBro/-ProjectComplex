@@ -7,14 +7,12 @@ import platform
 import sys
 import time
 import traceback
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from PIL import Image, ExifTags
-
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -30,10 +28,29 @@ def _enable_heic_heif() -> None:
         print(f"[WARNING] HEIC/HEIF not enabled: {e}")
 
 
+def load_image_bgr(path: str):
+    try:
+        import numpy as np  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        im = Image.open(path)
+        im.load()
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        rgb = np.asarray(im)
+        if getattr(rgb, "ndim", 0) != 3 or rgb.shape[2] < 3:
+            return None
+        bgr = rgb[:, :, ::-1].copy()
+        return bgr
+    except Exception:
+        return None
+
+
 def _patch_cv2_imread() -> None:
     try:
         import cv2  # type: ignore
-        import numpy as np  # type: ignore
     except Exception as e:
         print(f"[WARNING] OpenCV patch skipped: {e}")
         return
@@ -44,16 +61,7 @@ def _patch_cv2_imread() -> None:
         img = orig(path, flags)
         if img is not None:
             return img
-        try:
-            im = Image.open(path)
-            im.load()
-            if im.mode != "RGB":
-                im = im.convert("RGB")
-            rgb = np.asarray(im)
-            bgr = rgb[:, :, ::-1].copy()
-            return bgr
-        except Exception:
-            return None
+        return load_image_bgr(path)
 
     cv2.imread = patched
     print("[INFO] cv2.imread patched (Pillow fallback for unsupported formats)")
@@ -111,7 +119,7 @@ class _Tee:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="runner.py")
-    ap.add_argument("--task", required=True, choices=["cluster", "distance_full", "exif"])
+    ap.add_argument("--task", required=True, choices=["cluster", "distance_full", "exif", "preview"])
     ap.add_argument("--cluster-id", type=int, default=0)
     ap.add_argument("--input", required=True)
     ap.add_argument("--output-dir", required=True)
@@ -173,21 +181,17 @@ def _gps_to_decimal(gps: Dict[str, Any]) -> Dict[str, Any]:
             return float("nan")
 
     out: Dict[str, Any] = {}
-    lat = None
-    lon = None
     try:
         lat_ref = str(gps.get("GPSLatitudeRef", "")).upper().strip()
         lon_ref = str(gps.get("GPSLongitudeRef", "")).upper().strip()
         lat_val = gps.get("GPSLatitude")
         lon_val = gps.get("GPSLongitude")
-        if lat_val is not None:
-            lat = _dms_to_deg(lat_val)
-            if lat_ref == "S":
-                lat = -lat
-        if lon_val is not None:
-            lon = _dms_to_deg(lon_val)
-            if lon_ref == "W":
-                lon = -lon
+        lat = _dms_to_deg(lat_val) if lat_val is not None else None
+        lon = _dms_to_deg(lon_val) if lon_val is not None else None
+        if lat is not None and lat_ref == "S":
+            lat = -lat
+        if lon is not None and lon_ref == "W":
+            lon = -lon
         if lat is not None and lon is not None:
             if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
                 out["GPSLatitudeDecimal"] = lat
@@ -222,10 +226,14 @@ def extract_exif_full(path: str) -> Dict[str, Any]:
     out["PythonVersion"] = sys.version.replace("\n", " ")
     out["Platform"] = platform.platform()
 
-    img = None
     try:
         img = Image.open(str(p))
         img.load()
+    except Exception as e:
+        out["ImageOpenError"] = str(e)
+        return out
+
+    try:
         out["ImageFormat"] = getattr(img, "format", None)
         out["ImageMode"] = getattr(img, "mode", None)
         sz = getattr(img, "size", None)
@@ -233,11 +241,9 @@ def extract_exif_full(path: str) -> Dict[str, Any]:
             out["ImageWidth"] = int(sz[0])
             out["ImageHeight"] = int(sz[1])
             out["ImageSize"] = f"{int(sz[0])}x{int(sz[1])}"
-    except Exception as e:
-        out["ImageOpenError"] = str(e)
-        return out
+    except Exception:
+        pass
 
-    # PIL info blobs (EXIF/XMP/ICC/IPTC etc.)
     try:
         info = getattr(img, "info", {}) or {}
         if "exif" in info and isinstance(info["exif"], (bytes, bytearray)):
@@ -255,7 +261,6 @@ def extract_exif_full(path: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Standard EXIF via PIL
     exif_out: Dict[str, Any] = {}
     gps_out: Dict[str, Any] = {}
     try:
@@ -279,29 +284,6 @@ def extract_exif_full(path: str) -> Dict[str, Any]:
     if gps_out:
         out["GPS"] = gps_out
 
-    # HEIC container metadata (optional, best-effort)
-    try:
-        if ext in (".heic", ".heif"):
-            from pillow_heif import read_heif  # type: ignore
-            hf = read_heif(str(p))
-            meta_list = []
-            md = getattr(hf, "metadata", None)
-            if md:
-                for m in md:
-                    try:
-                        mtype = getattr(m, "type", None)
-                        mdata = getattr(m, "data", None)
-                        if isinstance(mdata, (bytes, bytearray)):
-                            meta_list.append({"type": str(mtype), "len": len(mdata), "base64": _safe_b64(bytes(mdata))})
-                        else:
-                            meta_list.append({"type": str(mtype), "data": _to_jsonable(mdata)})
-                    except Exception:
-                        continue
-            if meta_list:
-                out["HEICMetadata"] = meta_list
-    except Exception:
-        pass
-
     return out
 
 
@@ -321,6 +303,11 @@ def main() -> int:
 
     cfg = read_json(args.config)
     os.makedirs(args.output_dir, exist_ok=True)
+
+    try:
+        exif_full = extract_exif_full(args.input)
+    except Exception as e:
+        exif_full = {"EXIFExtractError": str(e)}
 
     started_ms = int(time.time() * 1000)
     buf = StringIO()
@@ -345,38 +332,76 @@ def main() -> int:
                     image_path=args.input,
                     out_dir=args.output_dir,
                     cfg=cfg,
-                    device_mode=args.device
+                    device_mode=args.device,
                 )
+
+                if not isinstance(module_result, dict):
+                    module_result = {"module_id": mod_name}
+                module_result["exif"] = exif_full
 
             elif args.task == "distance_full":
                 from full_distance.full_distance import run as run_full
+
                 module_result = run_full(
                     image_path=args.input,
                     out_dir=args.output_dir,
                     cfg=cfg,
-                    device_mode=args.device
+                    device_mode=args.device,
                 )
 
+                if not isinstance(module_result, dict):
+                    module_result = {"module_id": "distance_full"}
+                module_result["exif"] = exif_full
+
+            elif args.task == "preview":
+                im = Image.open(args.input)
+                im.load()
+                if im.mode != "RGBA":
+                    im = im.convert("RGBA")
+                w, h = im.size
+
+                raw_path = str(Path(args.output_dir) / "preview_rgba.raw")
+                with open(raw_path, "wb") as f:
+                    f.write(im.tobytes())
+
+                module_result = {
+                    "module_id": "preview",
+                    "device_used": str(args.device),
+                    "image_w": int(w),
+                    "image_h": int(h),
+                    "preview_format": "RGBA8888",
+                    "preview_w": int(w),
+                    "preview_h": int(h),
+                    "preview_stride": int(w) * 4,
+                    "preview_raw_path": raw_path,
+                    "exif": exif_full,
+                    "warnings": [],
+                    "detections": [],
+                    "artifacts": {},
+                    "timings_ms": {},
+                }
+
             else:  # exif
+                w = int(exif_full.get("ImageWidth", 0) or 0) if isinstance(exif_full, dict) else 0
+                h = int(exif_full.get("ImageHeight", 0) or 0) if isinstance(exif_full, dict) else 0
                 module_result = {
                     "module_id": "exif_full",
-                    "exif": extract_exif_full(args.input)
+                    "device_used": str(args.device),
+                    "image_w": int(w),
+                    "image_h": int(h),
+                    "exif": exif_full,
+                    "warnings": [],
+                    "detections": [],
+                    "artifacts": {},
+                    "timings_ms": {},
                 }
 
     except SystemExit as e:
         exit_code = int(e.code) if isinstance(getattr(e, "code", None), int) else 1
-        err_obj = {
-            "type": "SystemExit",
-            "message": str(e),
-            "traceback": traceback.format_exc(),
-        }
+        err_obj = {"type": "SystemExit", "message": str(e), "traceback": traceback.format_exc()}
     except Exception as e:
         exit_code = 1
-        err_obj = {
-            "type": type(e).__name__,
-            "message": str(e),
-            "traceback": traceback.format_exc(),
-        }
+        err_obj = {"type": type(e).__name__, "message": str(e), "traceback": traceback.format_exc()}
 
     finished_ms = int(time.time() * 1000)
     console_lines = _split_lines(buf.getvalue())

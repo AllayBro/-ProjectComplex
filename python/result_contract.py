@@ -209,6 +209,26 @@ def _read_exif_from_module_artifact(module_result: Optional[Dict[str, Any]]) -> 
     if not isinstance(module_result, dict):
         return {}, {}
 
+    inline = module_result.get("exif", None)
+    if isinstance(inline, dict) and inline:
+        gps_out: Dict[str, Any] = {}
+        gps_raw = inline.get("GPS", None)
+        if isinstance(gps_raw, dict) and gps_raw:
+            gps_out["raw"] = _jsonable(gps_raw)
+
+            lat = gps_raw.get("GPSLatitudeDecimal", None)
+            lon = gps_raw.get("GPSLongitudeDecimal", None)
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                gps_out["lat"] = float(lat)
+                gps_out["lon"] = float(lon)
+
+            alt = gps_raw.get("GPSAltitude", None)
+            alt_m = _rat(alt)
+            if alt_m is not None:
+                gps_out["alt_m"] = float(alt_m)
+
+        return _jsonable(inline), _jsonable(gps_out)
+
     artifacts = module_result.get("artifacts", {}) or {}
     if not isinstance(artifacts, dict):
         return {}, {}
@@ -233,17 +253,23 @@ def _read_exif_from_module_artifact(module_result: Optional[Dict[str, Any]]) -> 
 
     return _jsonable(exif_data), _jsonable(gps_out)
 
-
 def _collect_images(input_path: str, module_result: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
-    items.append({"role": "input", "path": _abs(input_path)})
+
+    inp = _abs(input_path)
+    if isinstance(module_result, dict):
+        dp = _abs(str(module_result.get("input_display_path", "") or ""))
+        if dp and _file_exists(dp):
+            inp = dp
+
+    items.append({"role": "input", "path": inp})
 
     if isinstance(module_result, dict):
         ap = _abs(str(module_result.get("annotated_image_path", "") or ""))
         cp = _abs(str(module_result.get("cleaned_image_path", "") or ""))
-        if ap:
+        if ap and _file_exists(ap):
             items.append({"role": "annotated", "path": ap})
-        if cp:
+        if cp and _file_exists(cp):
             items.append({"role": "cleaned", "path": cp})
 
         artifacts = module_result.get("artifacts", {}) or {}
@@ -253,7 +279,7 @@ def _collect_images(input_path: str, module_result: Optional[Dict[str, Any]]) ->
                     continue
                 s = _abs(v)
                 low = s.lower()
-                if low.endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")) and _file_exists(s):
+                if low.endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")) and _file_exists(s):
                     items.append({"role": f"artifact:{k}", "path": s})
 
     uniq: List[Dict[str, Any]] = []

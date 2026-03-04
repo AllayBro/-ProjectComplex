@@ -4,7 +4,8 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>
-
+#include <QImage>
+#include <QJsonObject>
 #include "AppConfig.h"
 #include "ModelTypes.h"
 
@@ -38,6 +39,9 @@ private:
     ResultView* m_view = nullptr;
 
     QString m_lastRunImagePath;
+
+    void applyPreview(const QString& imagePath);
+    bool runPreviewTaskRaw(const QString& inputPath, QImage& outImage, QJsonObject& outExifRoot, QString& err);
 
     QString yoloDirAbs() const;
     void reloadYoloModels();
