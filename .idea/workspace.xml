@@ -29,17 +29,17 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="28.02 - v0.4.3">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.02 - v0.4.3.2 - Fix model hub">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/result_contract.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/result_contract.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/claster_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/claster_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/python/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/resources/icons.qrc" beforeDir="false" afterPath="$PROJECT_DIR$/resources/icons.qrc" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -158,6 +158,11 @@
     </key>
   </component>
   <component name="RunManager">
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="vk_qt_app" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="vk_qt_app" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="vk_qt_app">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -209,7 +214,8 @@
       <workItem from="1772430936582" duration="1403000" />
       <workItem from="1772462740844" duration="309000" />
       <workItem from="1772515557449" duration="26854000" />
-      <workItem from="1772567159988" duration="3018000" />
+      <workItem from="1772567159988" duration="8376000" />
+      <workItem from="1772617724130" duration="14949000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -363,7 +369,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772545619241</updated>
     </task>
-    <option name="localTasksCounter" value="20" />
+    <task id="LOCAL-00020" summary="04.02 - v0.4.3.2 - Fix model hub">
+      <option name="closed" value="true" />
+      <created>1772599483980</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1772599483980</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -395,7 +409,9 @@
     <MESSAGE value="27.02 - v0.4.1 - Map" />
     <MESSAGE value="28.02 - v0.4.2 - Fix  map" />
     <MESSAGE value="28.02 - v0.4.3.1 - Fix  EXIF" />
-    <option name="LAST_COMMIT_MESSAGE" value="28.02 - v0.4.3.1 - Fix  EXIF" />
+    <MESSAGE value="28.02 - v0.4.3.2 - Fix model hub" />
+    <MESSAGE value="04.02 - v0.4.3.2 - Fix model hub" />
+    <option name="LAST_COMMIT_MESSAGE" value="04.02 - v0.4.3.2 - Fix model hub" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -407,7 +423,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/src/RunnerClient.cpp</url>
-          <option name="timeStamp" value="2" />
+          <option name="timeStamp" value="3" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

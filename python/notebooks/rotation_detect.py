@@ -9,6 +9,7 @@ Original file is located at
 
 
 import math, json, os, time
+from pathlib import Path
 import numpy as np
 import cv2
 import os
@@ -51,6 +52,7 @@ except Exception:
     torch = None
 
 CAR_CLASSES = {2, 3, 5, 7}
+ROT_KEEP_IDS = None
 
 # Чтение любого изображения (JPEG/PNG/HEIC)
 def read_image_auto(file_bytes: bytes):
@@ -70,20 +72,8 @@ def read_image_path(image_path: str):
     with open(image_path, "rb") as f:
         data = f.read()
     return read_image_auto(data)
-
-
-# Детектор машин (YOLOv11l + тайлинг + NMS)
-
-yolo = YOLO("yolo11n.pt")
-
-# model = YOLO("yolo11n.pt")   # nano
-# model = YOLO("yolo11s.pt")   # small
-# model = YOLO("yolo11m.pt")   # medium
-# model = YOLO("yolo11l.pt")   # large
-# model = YOLO("yolo11x.pt")   # x-large
-
+yolo = None
 YOLO_DEVICE_ARG = None
-
 def rotate_bound(img_bgr: np.ndarray, angle_deg: float):
     """
     Поворот без обрезания краёв (expand). Возвращает:
@@ -488,6 +478,9 @@ def bbox_from_work_to_original(bbox_work_xyxy, W0: int, H0: int, rot_k: int):
 #YOLO
 
 def _run_yolo_cars(im_bgr, conf, iou, imgsz, max_det, tta=False):
+    if "yolo" not in globals() or yolo is None:
+        raise RuntimeError("YOLO model is not initialized (yolo is None)")
+
     kwargs = dict(conf=conf, iou=iou, imgsz=imgsz, max_det=max_det, verbose=False)
     if "YOLO_DEVICE_ARG" in globals() and YOLO_DEVICE_ARG is not None:
         kwargs["device"] = YOLO_DEVICE_ARG
@@ -497,11 +490,19 @@ def _run_yolo_cars(im_bgr, conf, iou, imgsz, max_det, tta=False):
     r = yolo(im_bgr, **kwargs)[0]
     boxes = []
     for b in r.boxes:
-        if int(b.cls.item()) in CAR_CLASSES:
-            x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-            boxes.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item())))
-    return boxes
+        cls_id = int(b.cls.item())
 
+        if ROT_KEEP_IDS is not None:
+            if cls_id not in ROT_KEEP_IDS:
+                continue
+        else:
+            if cls_id not in CAR_CLASSES:
+                continue
+
+        x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
+        boxes.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item())))
+
+    return boxes
 
 def _estimate_deskew_angle_deg(img_bgr: np.ndarray, max_side: int = 960):
     """
@@ -1763,17 +1764,33 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
       "detections": [ { "bbox_xyxy":[x1,y1,x2,y2], "conf":float, "cls_id":int, "cls_name":str, "meta":{} } ]
     }
     """
-    def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
-        global yolo, YOLO_DEVICE_ARG
-
     t0 = time.time()
     os.makedirs(out_dir, exist_ok=True)
 
     warnings = []
 
-    nb = (cfg.get("notebooks", {}) or {}).get("rotation_detect", {}) or {}
-    model_path = str(nb.get("model_path", "yolo11n.pt"))
+    global yolo, YOLO_DEVICE_ARG, ROT_KEEP_IDS, DET_CFG
 
+    nb = (cfg.get("notebooks", {}) or {}).get("rotation_detect", {}) or {}
+    det_cfg = (cfg.get("detector", {}) or {})
+    pp_cfg = (cfg.get("postprocess", {}) or {})
+    un_cfg = (cfg.get("union_nms", {}) or {})
+
+    model_path = str(cfg.get("yolo_model_path", "") or "").strip().strip('"').strip("'")
+    if not model_path:
+        model_path = str(nb.get("model_path", "") or "").strip().strip('"').strip("'")
+    if not model_path:
+        raise FileNotFoundError("Не задан yolo_model_path (и rotation_detect.model_path) в cfg")
+
+    from pathlib import Path
+    model_path = os.path.expandvars(os.path.expanduser(model_path))
+    if not Path(model_path).is_absolute():
+        ydir = str(cfg.get("yolo_dir", "") or "").strip()
+        ydir = os.path.expandvars(os.path.expanduser(ydir))
+        if ydir:
+            model_path = str((Path(ydir) / model_path).resolve())
+    if not Path(model_path).exists():
+        raise FileNotFoundError(f"Файл весов не найден: {model_path}")
     try:
         if getattr(yolo, "_vk_model_path", None) != model_path:
             yolo = YOLO(model_path)
@@ -1782,6 +1799,33 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         yolo = YOLO(model_path)
         yolo._vk_model_path = model_path
 
+    DET_CFG["conf"] = float(nb.get("conf", det_cfg.get("conf", DET_CFG.get("conf", 0.18))))
+    DET_CFG["iou"] = float(nb.get("iou", det_cfg.get("iou", DET_CFG.get("iou", 0.55))))
+    DET_CFG["imgsz"] = int(nb.get("imgsz", det_cfg.get("imgsz", DET_CFG.get("imgsz", 1984))))
+    DET_CFG["max_det"] = int(nb.get("max_det", det_cfg.get("max_det", 300)))
+
+    if bool(un_cfg.get("enabled", False)):
+        try:
+            DET_CFG["merge_iou"] = float(un_cfg.get("iou", DET_CFG.get("merge_iou", 0.55)))
+        except Exception:
+            pass
+
+    keep_names = pp_cfg.get("keep_classes", None)
+    name_set = {str(x).lower().strip() for x in (keep_names or []) if str(x).strip()}
+    try:
+        names = getattr(yolo, "names", None) or getattr(getattr(yolo, "model", None), "names", None)
+        keep_ids = set()
+        if isinstance(names, dict):
+            for k, v in names.items():
+                if str(v).lower().strip() in name_set:
+                    keep_ids.add(int(k))
+        elif isinstance(names, (list, tuple)):
+            for k, v in enumerate(names):
+                if str(v).lower().strip() in name_set:
+                    keep_ids.add(int(k))
+        ROT_KEEP_IDS = keep_ids if keep_ids else None
+    except Exception:
+        ROT_KEEP_IDS = None
     YOLO_DEVICE_ARG = None
     device_used = "cpu"
     if (device_mode or "auto") != "cpu" and torch is not None:

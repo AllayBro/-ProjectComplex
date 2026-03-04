@@ -58,8 +58,33 @@ SHRINK_FRAC = 0
 
 
 # Поджатие финального бокса, чтобы убрать лишние пустоты
-YOLO_DIR = Path(__file__).resolve().parents[3] / "yolo"
-model = YOLO(str(YOLO_DIR / "yolo11n.pt"))
+model = None
+_model_key = None
+
+def _get_model(cfg: dict, device_mode: str):
+    global model, _model_key
+
+    # Qt передаёт это поле (RunnerClient.cpp patch.insert("yolo_model_path", ...))
+    model_path = str(cfg.get("yolo_model_path") or cfg.get("model_path") or "").strip()
+    if not model_path:
+        raise RuntimeError("yolo_model_path пустой (модель YOLO не передана из UI/конфига).")
+
+    p = Path(model_path)
+    if not p.exists():
+        raise RuntimeError(f"Файл модели YOLO не найден: {model_path}")
+
+    key = (str(p.resolve()), str(device_mode))
+    if model is not None and _model_key == key:
+        return model
+
+    m = YOLO(str(p.resolve()))
+
+    # device_mode: "auto"|"cpu"|"cuda:0" и т.п. (как Вы передаёте из Qt)
+    # У ultralytics устройство задаётся при predict, но модель можно держать одну.
+    model = m
+    _model_key = key
+    return model
+
 def load_image_from_path(image_path: str):
     img = Image.open(image_path).convert("RGB")
     img_np = np.array(img)
@@ -618,6 +643,8 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     global CAND_IOU_MIN, CENTER_SCALE_X, CENTER_SCALE_Y
     global SHRINK_FRAC
 
+    m = _get_model(cfg, device_mode)
+    model = m
     t0 = time.time()
     os.makedirs(out_dir, exist_ok=True)
 
@@ -642,15 +669,6 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     if "shrink_frac" in nb: SHRINK_FRAC = float(nb["shrink_frac"])
 
-    model_path = str(nb.get("model_path", "yolo11n.pt"))
-
-    try:
-        if getattr(model, "_vk_model_path", None) != model_path:
-            model = YOLO(model_path)
-            model._vk_model_path = model_path
-    except Exception:
-        model = YOLO(model_path)
-        model._vk_model_path = model_path
 
     device_used = "cpu"
     if (device_mode or "auto") != "cpu" and torch is not None:

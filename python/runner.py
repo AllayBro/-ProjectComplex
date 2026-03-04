@@ -12,7 +12,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PIL import Image, ExifTags
+from PIL import Image, ImageOps, ExifTags
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -37,6 +37,7 @@ def load_image_bgr(path: str):
     try:
         im = Image.open(path)
         im.load()
+        im = ImageOps.exif_transpose(im)
         if im.mode != "RGB":
             im = im.convert("RGB")
         rgb = np.asarray(im)
@@ -66,9 +67,35 @@ def _patch_cv2_imread() -> None:
     cv2.imread = patched
     print("[INFO] cv2.imread patched (Pillow fallback for unsupported formats)")
 
+def _open_image_any(path: str) -> Image.Image:
+    """Открыть изображение (включая HEIC/HEIF при наличии pillow-heif)."""
+    p = Path(path)
+    ext = p.suffix.lower()
+    try:
+        im = Image.open(path)
+        im.load()
+        return im
+    except Exception as e:
+        if ext in {".heic", ".heif"}:
+            # запасной вариант: pyheif (если установлен)
+            try:
+                import pyheif  # type: ignore
+
+                h = pyheif.read(path)
+                im = Image.frombytes(h.mode, h.size, h.data, "raw", h.mode)
+                im.load()
+                return im
+            except Exception:
+                raise RuntimeError(
+                    "HEIC/HEIF не прочитан. Установите пакет pillow-heif (рекомендуется) "
+                    "или pyheif."
+                ) from e
+        raise
 
 _enable_heic_heif()
 _patch_cv2_imread()
+
+
 
 from result_contract import build_result  # noqa: E402
 
@@ -352,12 +379,15 @@ def main() -> int:
                 if not isinstance(module_result, dict):
                     module_result = {"module_id": "distance_full"}
                 module_result["exif"] = exif_full
-
             elif args.task == "preview":
-                im = Image.open(args.input)
-                im.load()
-                if im.mode != "RGBA":
-                    im = im.convert("RGBA")
+                im0 = _open_image_any(args.input)
+                im0 = ImageOps.exif_transpose(im0)
+
+                if im0.mode != "RGBA":
+                    im = im0.convert("RGBA")
+                else:
+                    im = im0
+
                 w, h = im.size
 
                 raw_path = str(Path(args.output_dir) / "preview_rgba.raw")
@@ -369,18 +399,21 @@ def main() -> int:
                     "device_used": str(args.device),
                     "image_w": int(w),
                     "image_h": int(h),
+
+                    "input_display_path": str(args.input),
+
                     "preview_format": "RGBA8888",
                     "preview_w": int(w),
                     "preview_h": int(h),
                     "preview_stride": int(w) * 4,
                     "preview_raw_path": raw_path,
+
                     "exif": exif_full,
                     "warnings": [],
                     "detections": [],
                     "artifacts": {},
                     "timings_ms": {},
                 }
-
             else:  # exif
                 w = int(exif_full.get("ImageWidth", 0) or 0) if isinstance(exif_full, dict) else 0
                 h = int(exif_full.get("ImageHeight", 0) or 0) if isinstance(exif_full, dict) else 0
@@ -395,17 +428,34 @@ def main() -> int:
                     "artifacts": {},
                     "timings_ms": {},
                 }
-
     except SystemExit as e:
         exit_code = int(e.code) if isinstance(getattr(e, "code", None), int) else 1
         err_obj = {"type": "SystemExit", "message": str(e), "traceback": traceback.format_exc()}
+        try:
+            sys.stderr.write(err_obj["traceback"] + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+
     except Exception as e:
         exit_code = 1
         err_obj = {"type": type(e).__name__, "message": str(e), "traceback": traceback.format_exc()}
+        try:
+            sys.stderr.write(err_obj["traceback"] + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
+    except Exception as e:
+        exit_code = 1
+        err_obj = {"type": type(e).__name__, "message": str(e), "traceback": traceback.format_exc()}
+        try:
+            sys.stderr.write(err_obj["traceback"] + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
     finished_ms = int(time.time() * 1000)
     console_lines = _split_lines(buf.getvalue())
-
     result_obj = build_result(
         task=str(args.task),
         cluster_id=int(args.cluster_id),
@@ -433,4 +483,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+    sys.exit(exit_code)

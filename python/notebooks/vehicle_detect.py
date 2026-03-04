@@ -464,27 +464,6 @@ def detect_tiled(model, img_bgr, **kwargs):
 if __name__ == "__main__":
     init_data()
 
-
-
-
-
-dst_dir = Path("/content/drive/MyDrive/DRONE/data_det")
-dst_dir.mkdir(parents=True, exist_ok=True)
-
-repo_id = "erbayat/yolov11x-visdrone"
-filename = "yolo11x-visdrone.pt"
-
-pt = dst_dir / filename
-
-if pt.exists():
-    MODEL_PATH = str(pt)
-else:
-    MODEL_PATH = str(CFG.get("MODEL_PATH", ""))
-
-print("PT files in DRONE/data_det:", [p.name for p in dst_dir.glob("*.pt")])
-print("Selected:", MODEL_PATH, "exists=", Path(MODEL_PATH).exists() if MODEL_PATH else False)
-
-
 if __name__ == "__main__":
     det = get_det_model()
     keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
@@ -1390,8 +1369,10 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     os.makedirs(out_dir, exist_ok=True)
 
     warnings = []
-
     nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
+    det_cfg = (cfg.get("detector", {}) or {})
+    pp_cfg  = (cfg.get("postprocess", {}) or {})
+    un_cfg  = (cfg.get("union_nms", {}) or {})
 
     model_path = str(cfg.get("yolo_model_path", "") or "").strip().strip('"').strip("'")
     if not model_path:
@@ -1406,19 +1387,38 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Файл весов не найден: {model_path}")
+
     CFG["MODEL_PATH"] = model_path
-    CFG["DET_CONF"] = float(nb.get("conf", CFG.get("DET_CONF", 0.01)))
-    CFG["DET_IOU"] = float(nb.get("iou", CFG.get("DET_IOU", 0.5)))
-    CFG["DET_MAX_DET"] = int(nb.get("max_det", CFG.get("DET_MAX_DET", 300)))
-    CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
+
+    # классы для фильтрации по именам (если заданы в config)
+    try:
+        keep_names = pp_cfg.get("keep_classes", None)
+        if keep_names:
+            CFG["KEEP_CLASS_NAMES"] = {str(x) for x in keep_names if str(x).strip()}
+    except Exception:
+        pass
+
+    # параметры детектора берём из общего конфига (а не из colab-дефолтов)
+    CFG["DET_CONF"] = float(nb.get("conf", det_cfg.get("conf", CFG.get("DET_CONF", 0.15))))
+    CFG["DET_IOU"] = float(nb.get("iou", det_cfg.get("iou", CFG.get("DET_IOU", 0.5))))
+    CFG["DET_MAX_DET"] = int(nb.get("max_det", det_cfg.get("max_det", CFG.get("DET_MAX_DET", 300))))
+
+    # склейка между тайлами
+    if bool(un_cfg.get("enabled", False)):
+        CFG["DET_NMS_THR"] = float(un_cfg.get("iou", CFG.get("DET_NMS_THR", 0.55)))
+    else:
+        CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
+
     CFG["TILED_BATCH"] = int(nb.get("tiled_batch", CFG.get("TILED_BATCH", 16)))
     CFG["OVERLAP"] = float(nb.get("overlap", CFG.get("OVERLAP", 0.2)))
 
-    tile_v = nb.get("tile", CFG.get("TILE", 640))
-    CFG["TILE"] = int(tile_v) if str(tile_v).lower() != "auto" else "auto"
-    CFG["AUTO_TILE_TARGET"] = int(
-        nb.get("auto_tile_target", CFG.get("AUTO_TILE_TARGET", 640))
-    )
+    # ключ к 4K: авто-тайл под imgsz (иначе 40–60 тайлов и дубли)
+    tile_v = nb.get("tile", "auto")
+    CFG["TILE"] = int(tile_v) if str(tile_v).lower() not in ("auto", "") else "auto"
+
+    target = det_cfg.get("imgsz", 1280) or 1280
+    CFG["AUTO_TILE_TARGET"] = int(nb.get("auto_tile_target", target))
+    CFG["TILED_IMGSZ"] = int(nb.get("imgsz", target))
 
     prefer_gpu = (device_mode or "auto") != "cpu"
     PRED_DEVICE = pick_device(prefer_gpu=prefer_gpu)
@@ -1455,7 +1455,75 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     )
 
     t_inf1 = time.time()
+    pp_cfg = (cfg.get("postprocess", {}) or {})
+    if bool(pp_cfg.get("enabled", False)) and boxes:
+        min_conf = float(pp_cfg.get("min_conf", float(CFG["DET_CONF"])))
+        min_box_px = int(pp_cfg.get("min_box_px", 0))
+        min_area_frac = float(pp_cfg.get("min_area_frac", 0.0))
+        ar_min = float(pp_cfg.get("aspect_ratio_min", 0.0))
+        ar_max = float(pp_cfg.get("aspect_ratio_max", 1e9))
+        ex_top = float(pp_cfg.get("exclude_top_frac", 0.0))
+        ex_bot = float(pp_cfg.get("exclude_bottom_frac", 0.0))
 
+        img_area = float(W * H) if W > 0 and H > 0 else 0.0
+        y_top = int(round(ex_top * H))
+        y_bot = int(round((1.0 - ex_bot) * H))
+
+        filtered = []
+        for (x1, y1, x2, y2, c) in boxes:
+            c = float(c)
+            if c < min_conf:
+                continue
+            bw = int(x2) - int(x1)
+            bh = int(y2) - int(y1)
+            if bw < min_box_px or bh < min_box_px:
+                continue
+            if img_area > 0.0 and (bw * bh) < (min_area_frac * img_area):
+                continue
+            if bw > 0 and bh > 0:
+                ar = float(bw) / float(bh)
+                if ar < ar_min or ar > ar_max:
+                    continue
+            cy = (int(y1) + int(y2)) // 2
+            if cy < y_top or cy > y_bot:
+                continue
+            filtered.append((int(x1), int(y1), int(x2), int(y2), c))
+
+        cont_cfg = (pp_cfg.get("containment", {}) or {})
+        if bool(cont_cfg.get("enabled", False)) and filtered:
+            cover_thr = float(cont_cfg.get("cover_thr", 0.92))
+            conf_margin = float(cont_cfg.get("conf_margin", 0.02))
+
+            def _inter(a, b):
+                ax1, ay1, ax2, ay2 = a
+                bx1, by1, bx2, by2 = b
+                ix1 = max(ax1, bx1); iy1 = max(ay1, by1)
+                ix2 = min(ax2, bx2); iy2 = min(ay2, by2)
+                iw = max(0, ix2 - ix1); ih = max(0, iy2 - iy1)
+                return iw * ih
+
+            def _area(bb):
+                return max(0, bb[2] - bb[0]) * max(0, bb[3] - bb[1])
+
+            kept = []
+            for b in sorted(filtered, key=lambda t: t[4], reverse=True):
+                bb = b[:4]
+                ab = _area(bb)
+                if ab <= 0:
+                    continue
+                drop = False
+                for k in kept:
+                    kk = k[:4]
+                    inter = _inter(kk, bb)
+                    cover = inter / float(ab + 1e-6)
+                    if cover >= cover_thr and float(k[4]) >= float(b[4]) + conf_margin:
+                        drop = True
+                        break
+                if not drop:
+                    kept.append(b)
+            boxes = kept
+        else:
+            boxes = filtered
     dets = []
 
     for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
