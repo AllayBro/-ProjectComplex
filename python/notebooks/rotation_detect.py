@@ -187,6 +187,110 @@ def nms_union(boxes, thr=0.55):
             kept.append(b)
     return kept
 
+def _vk_expand_xyxy(x1, y1, x2, y2, frac):
+    w = max(1.0, float(x2) - float(x1))
+    h = max(1.0, float(y2) - float(y1))
+    dx = float(frac) * w
+    dy = float(frac) * h
+    return (float(x1) - dx, float(y1) - dy, float(x2) + dx, float(y2) + dy)
+
+def _vk_interval_gap(a1, a2, b1, b2):
+    a1 = float(a1); a2 = float(a2); b1 = float(b1); b2 = float(b2)
+    if a2 < b1:
+        return b1 - a2
+    if b2 < a1:
+        return a1 - b2
+    return 0.0
+
+def _vk_axis_overlap_ratio(a1, a2, b1, b2):
+    a1 = float(a1); a2 = float(a2); b1 = float(b1); b2 = float(b2)
+    ov = max(0.0, min(a2, b2) - max(a1, b1))
+    denom = max(1e-6, min(a2 - a1, b2 - b1))
+    return ov / denom
+
+def _vk_merge_parts_union(boxes,
+                          iou_thr=0.25,
+                          exp_frac=0.25,
+                          exp_iou_thr=0.05,
+                          axis_ov_thr=0.60,
+                          gap_frac=0.35,
+                          center_frac=2.0):
+    if not boxes:
+        return []
+
+    n = len(boxes)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def unite(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    P = []
+    for (x1, y1, x2, y2, c) in boxes:
+        x1f = float(x1); y1f = float(y1); x2f = float(x2); y2f = float(y2)
+        w = max(1.0, x2f - x1f)
+        h = max(1.0, y2f - y1f)
+        cx = 0.5 * (x1f + x2f)
+        cy = 0.5 * (y1f + y2f)
+        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy))
+
+    for i in range(n):
+        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi = P[i]
+        for j in range(i + 1, n):
+            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj = P[j]
+
+            if abs(cxi - cxj) > float(center_frac) * max(wi, wj):
+                continue
+            if abs(cyi - cyj) > float(center_frac) * max(hi, hj):
+                continue
+
+            if iou_xyxy((x1i, y1i, x2i, y2i), (x1j, y1j, x2j, y2j)) >= float(iou_thr):
+                unite(i, j)
+                continue
+
+            ei = _vk_expand_xyxy(x1i, y1i, x2i, y2i, exp_frac)
+            ej = _vk_expand_xyxy(x1j, y1j, x2j, y2j, exp_frac)
+            if iou_xyxy(ei, ej) >= float(exp_iou_thr):
+                unite(i, j)
+                continue
+
+            yov = _vk_axis_overlap_ratio(y1i, y2i, y1j, y2j)
+            xov = _vk_axis_overlap_ratio(x1i, x2i, x1j, x2j)
+            xgap = _vk_interval_gap(x1i, x2i, x1j, x2j)
+            ygap = _vk_interval_gap(y1i, y2i, y1j, y2j)
+
+            if (yov >= float(axis_ov_thr)) and (xgap <= float(gap_frac) * max(wi, wj)):
+                unite(i, j)
+                continue
+            if (xov >= float(axis_ov_thr)) and (ygap <= float(gap_frac) * max(hi, hj)):
+                unite(i, j)
+                continue
+
+    clusters = {}
+    for idx in range(n):
+        r = find(idx)
+        clusters.setdefault(r, []).append(idx)
+
+    merged = []
+    for comp in clusters.values():
+        x1 = min(P[k][0] for k in comp)
+        y1 = min(P[k][1] for k in comp)
+        x2 = max(P[k][2] for k in comp)
+        y2 = max(P[k][3] for k in comp)
+        c = max(P[k][4] for k in comp)
+        if x2 > x1 and y2 > y1:
+            merged.append((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(c)))
+
+    merged.sort(key=lambda t: t[4], reverse=True)
+    return merged
+
 def merge_close_small(boxes, max_dist=6, max_size=26):
     """
     Склейка пачек очень мелких боксов, которые
@@ -958,7 +1062,16 @@ DET_CFG = {
     "do_containment": True,
 
     # TTA
-    "tta": False
+    "tta": False,
+
+    # Ofter
+    "merge_parts": True,
+    "merge_parts_iou_thr": 0.25,
+    "merge_parts_exp_frac": 0.25,
+    "merge_parts_exp_iou_thr": 0.05,
+    "merge_parts_axis_ov_thr": 0.60,
+    "merge_parts_gap_frac": 0.35,
+    "merge_parts_center_frac": 2.0
 }
 
 def _run_yolo_cars_tiled(im_bgr, conf, iou, imgsz, max_det, tta, tile, overlap):
@@ -1059,7 +1172,16 @@ def detect_all_cars(
         all_boxes = nms_union(all_boxes, thr=merge_iou)
         if do_containment:
             all_boxes = _containment_suppression(all_boxes, contain_thr=0.92, conf_margin=0.02)
-
+            if bool(cfg.get("merge_parts", True)):
+                all_boxes = _vk_merge_parts_union(
+                    all_boxes,
+                    iou_thr=float(cfg.get("merge_parts_iou_thr", 0.25)),
+                    exp_frac=float(cfg.get("merge_parts_exp_frac", 0.25)),
+                    exp_iou_thr=float(cfg.get("merge_parts_exp_iou_thr", 0.05)),
+                    axis_ov_thr=float(cfg.get("merge_parts_axis_ov_thr", 0.60)),
+                    gap_frac=float(cfg.get("merge_parts_gap_frac", 0.35)),
+                    center_frac=float(cfg.get("merge_parts_center_frac", 2.0)),
+                )
     return all_boxes
 
 # Вспомогательные функции для работы с углами и геометрией

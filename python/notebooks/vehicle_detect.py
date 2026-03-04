@@ -264,6 +264,125 @@ def nms_union(boxes, thr=0.5):
             kept.append(b)
     return kept
 
+def _vk_expand_xyxy(x1, y1, x2, y2, frac, W, H):
+    w = max(1.0, float(x2) - float(x1))
+    h = max(1.0, float(y2) - float(y1))
+    dx = float(frac) * w
+    dy = float(frac) * h
+    xx1 = max(0.0, float(x1) - dx)
+    yy1 = max(0.0, float(y1) - dy)
+    xx2 = min(float(W - 1), float(x2) + dx)
+    yy2 = min(float(H - 1), float(y2) + dy)
+    return (xx1, yy1, xx2, yy2)
+
+def _vk_interval_gap(a1, a2, b1, b2):
+    a1 = float(a1); a2 = float(a2); b1 = float(b1); b2 = float(b2)
+    if a2 < b1:
+        return b1 - a2
+    if b2 < a1:
+        return a1 - b2
+    return 0.0
+
+def _vk_axis_overlap_ratio(a1, a2, b1, b2):
+    a1 = float(a1); a2 = float(a2); b1 = float(b1); b2 = float(b2)
+    ov = max(0.0, min(a2, b2) - max(a1, b1))
+    denom = max(1e-6, min(a2 - a1, b2 - b1))
+    return ov / denom
+
+def _vk_merge_parts_union(boxes, W, H,
+                          iou_thr=0.25,
+                          exp_frac=0.25,
+                          exp_iou_thr=0.05,
+                          axis_ov_thr=0.60,
+                          gap_frac=0.35,
+                          center_frac=2.0):
+    if not boxes:
+        return []
+
+    n = len(boxes)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def unite(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # предрасчёт размеров/центров (ничего не фильтруем!)
+    P = []
+    for (x1, y1, x2, y2, c) in boxes:
+        x1f = float(x1); y1f = float(y1); x2f = float(x2); y2f = float(y2)
+        w = max(1.0, x2f - x1f)
+        h = max(1.0, y2f - y1f)
+        cx = 0.5 * (x1f + x2f)
+        cy = 0.5 * (y1f + y2f)
+        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy))
+
+    for i in range(n):
+        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi = P[i]
+        for j in range(i + 1, n):
+            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj = P[j]
+
+            # защита от склейки далёких разных объектов (без жёстких пиксельных порогов)
+            if abs(cxi - cxj) > float(center_frac) * max(wi, wj):
+                continue
+            if abs(cyi - cyj) > float(center_frac) * max(hi, hj):
+                continue
+
+            # 1) обычный IoU
+            if iou_xyxy((x1i, y1i, x2i, y2i), (x1j, y1j, x2j, y2j)) >= float(iou_thr):
+                unite(i, j)
+                continue
+
+            # 2) IoU расширенных боксов (чтобы “детали” машины слипались)
+            ei = _vk_expand_xyxy(x1i, y1i, x2i, y2i, exp_frac, W, H)
+            ej = _vk_expand_xyxy(x1j, y1j, x2j, y2j, exp_frac, W, H)
+            if iou_xyxy(ei, ej) >= float(exp_iou_thr):
+                unite(i, j)
+                continue
+
+            # 3) осевое перекрытие + малый разрыв (перед/зад/стекло/фара)
+            yov = _vk_axis_overlap_ratio(y1i, y2i, y1j, y2j)
+            xov = _vk_axis_overlap_ratio(x1i, x2i, x1j, x2j)
+            xgap = _vk_interval_gap(x1i, x2i, x1j, x2j)
+            ygap = _vk_interval_gap(y1i, y2i, y1j, y2j)
+
+            if (yov >= float(axis_ov_thr)) and (xgap <= float(gap_frac) * max(wi, wj)):
+                unite(i, j)
+                continue
+            if (xov >= float(axis_ov_thr)) and (ygap <= float(gap_frac) * max(hi, hj)):
+                unite(i, j)
+                continue
+
+    clusters = {}
+    for idx in range(n):
+        r = find(idx)
+        clusters.setdefault(r, []).append(idx)
+
+    merged = []
+    for comp in clusters.values():
+        x1 = min(P[k][0] for k in comp)
+        y1 = min(P[k][1] for k in comp)
+        x2 = max(P[k][2] for k in comp)
+        y2 = max(P[k][3] for k in comp)
+        c = max(P[k][4] for k in comp)
+
+        x1 = int(max(0, min(int(round(x1)), W - 1)))
+        y1 = int(max(0, min(int(round(y1)), H - 1)))
+        x2 = int(max(0, min(int(round(x2)), W - 1)))
+        y2 = int(max(0, min(int(round(y2)), H - 1)))
+
+        if x2 > x1 and y2 > y1:
+            merged.append((x1, y1, x2, y2, float(c)))
+
+    merged.sort(key=lambda t: t[4], reverse=True)
+    return merged
+
 def filter_boxes_geom(boxes, cfg=None):
     if cfg is None:
         return boxes
@@ -1524,6 +1643,19 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             boxes = kept
         else:
             boxes = filtered
+        mp_cfg = (pp_cfg.get("merge_parts", {}) or {})
+    if bool(mp_cfg.get("enabled", True)) and boxes:
+        boxes = _vk_merge_parts_union(
+            boxes,
+            W=W,
+            H=H,
+            iou_thr=float(mp_cfg.get("iou_thr", 0.25)),
+            exp_frac=float(mp_cfg.get("exp_frac", 0.25)),
+            exp_iou_thr=float(mp_cfg.get("exp_iou_thr", 0.05)),
+            axis_ov_thr=float(mp_cfg.get("axis_ov_thr", 0.60)),
+            gap_frac=float(mp_cfg.get("gap_frac", 0.35)),
+            center_frac=float(mp_cfg.get("center_frac", 2.0)),
+        )
     dets = []
 
     for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
