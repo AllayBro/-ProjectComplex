@@ -30,26 +30,7 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5 - Alpha Release">
-      <change afterPath="$PROJECT_DIR$/.github/workflows/ci.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.github/workflows/release.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/QtSettings.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/app_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/app_config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/full_distance/full_distance.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/full_distance/full_distance.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/objects_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/objects_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/speed_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/speed_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
-    </list>
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5.1 - Fix full_distance" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -228,7 +209,7 @@
       <workItem from="1772617724130" duration="18664000" />
       <workItem from="1772651247481" duration="872000" />
       <workItem from="1772652202579" duration="637000" />
-      <workItem from="1772689748722" duration="4479000" />
+      <workItem from="1772689748722" duration="4994000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -406,7 +387,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772649298507</updated>
     </task>
-    <option name="localTasksCounter" value="23" />
+    <task id="LOCAL-00023" summary="04.03 - v0.5.1 - Fix full_distance">
+      <option name="closed" value="true" />
+      <created>1772694756454</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1772694756454</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -442,7 +431,8 @@
     <MESSAGE value="04.02 - v0.4.3.2 - Fix model hub" />
     <MESSAGE value="04.03 - v0.4.4 - Add repain programm" />
     <MESSAGE value="04.03 - v0.5 - Alpha Release" />
-    <option name="LAST_COMMIT_MESSAGE" value="04.03 - v0.5 - Alpha Release" />
+    <MESSAGE value="04.03 - v0.5.1 - Fix full_distance" />
+    <option name="LAST_COMMIT_MESSAGE" value="04.03 - v0.5.1 - Fix full_distance" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
