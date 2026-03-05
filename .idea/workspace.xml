@@ -30,7 +30,9 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5.1 - Fix full_distance" />
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5.1 - Fix full_distance">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -209,7 +211,7 @@
       <workItem from="1772617724130" duration="18664000" />
       <workItem from="1772651247481" duration="872000" />
       <workItem from="1772652202579" duration="637000" />
-      <workItem from="1772689748722" duration="4994000" />
+      <workItem from="1772689748722" duration="5929000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -395,7 +397,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772694756454</updated>
     </task>
-    <option name="localTasksCounter" value="24" />
+    <task id="LOCAL-00024" summary="04.03 - v0.5.1 - Fix full_distance">
+      <option name="closed" value="true" />
+      <created>1772695457579</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1772695457579</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

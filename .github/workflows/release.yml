@@ -32,6 +32,12 @@ jobs:
           arch: ${{ env.QT_ARCH }}
           cache: true
 
+      - name: Setup CMake 4.0.2 + Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 4.0.2
+          ninjaVersion: latest
+
       - name: Configure (CMake Release)
         shell: cmd
         run: |
