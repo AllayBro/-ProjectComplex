@@ -31,6 +31,8 @@ jobs:
         with:
           python-version: "3.12.10"
           architecture: "x64"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
 
       - name: Install Python deps
         shell: cmd
@@ -67,10 +69,38 @@ jobs:
         run: |
           ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
 
-      - name: Upload artifact (Release exe)
+      - name: Package portable (Qt + Python)
+        if: matrix.build_type == 'Release'
+        shell: cmd
+        run: |
+          if exist dist rmdir /S /Q dist
+          mkdir dist\traffic
+
+          set "APP_EXE="
+          for /r "%BUILD_DIR%" %%F in ("%APP_TARGET%.exe") do (
+            set "APP_EXE=%%F"
+            goto :found
+          )
+          :found
+          if "%APP_EXE%"=="" (
+            echo [ERROR] %APP_TARGET%.exe not found under %BUILD_DIR%
+            exit /b 1
+          )
+
+          copy /Y "%APP_EXE%" "dist\traffic\%APP_TARGET%.exe"
+
+          "%QT_ROOT_DIR%\bin\windeployqt.exe" --release --no-translations --compiler-runtime --qmldir "%GITHUB_WORKSPACE%" "dist\traffic\%APP_TARGET%.exe"
+
+          xcopy /E /I /Y "%pythonLocation%" "dist\traffic\py"
+          copy /Y "dist\traffic\py\pythonw.exe" "dist\traffic\py\traffic_py.exe"
+
+          if exist "python" xcopy /E /I /Y "python" "dist\traffic\python"
+          if exist "yolo"   xcopy /E /I /Y "yolo"   "dist\traffic\yolo"
+          if exist "config" xcopy /E /I /Y "config" "dist\traffic\config"
+
+      - name: Upload artifact (Release package)
         if: matrix.build_type == 'Release'
         uses: actions/upload-artifact@v4
         with:
-          name: windows-mingw-${{ env.APP_TARGET }}-${{ github.sha }}
-          path: |
-            ${{ env.BUILD_DIR }}\**\${{ env.APP_TARGET }}.exe
+          name: traffic-${{ github.sha }}
+          path: dist\traffic\**

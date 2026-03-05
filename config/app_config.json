@@ -15,6 +15,6 @@
     "offline_tiles_dir": "",
     "cache_dir": "",
     "user_agent": "traffic",
-    "python_exe": "py/python.exe"
+    "python_exe": "py/traffic_py.exe"
   }
 }
