@@ -69,7 +69,7 @@ jobs:
           copy /Y "%APP_EXE%" "%DIST_DIR%\\%APP_TARGET%.exe"
 
           windeployqt --release --no-translations --compiler-runtime --qmldir "%GITHUB_WORKSPACE%" "%DIST_DIR%\\%APP_TARGET%.exe"
-
+          xcopy /E /I /Y "%pythonLocation%" "%DIST_DIR%\py"
           if exist "python" xcopy /E /I /Y "python" "%DIST_DIR%\\python"
           if exist "yolo"   xcopy /E /I /Y "yolo"   "%DIST_DIR%\\yolo"
           if exist "config" xcopy /E /I /Y "config" "%DIST_DIR%\\config"

@@ -310,7 +310,8 @@ void RunnerClient::startProcess(const QStringList& args) {
     m_runLog.close();
     m_runLogPath.clear();
 
-    m_proc->setProgram(m_cfg.pythonExe);
+    const QString pyExe = absPath(m_appDir, m_cfg.pythonExe);
+    m_proc->setProgram(pyExe);
 
     QStringList fullArgs;
     fullArgs << "-u";
@@ -321,7 +322,7 @@ void RunnerClient::startProcess(const QStringList& args) {
     // Команда (для диагностики)
     {
         QStringList parts;
-        parts << quoteForLog(m_cfg.pythonExe);
+        parts << quoteForLog(pyExe);
         for (const auto& a : fullArgs) parts << quoteForLog(a);
         m_lastCmdLine = parts.join(' ');
     }
@@ -344,7 +345,7 @@ void RunnerClient::startProcess(const QStringList& args) {
             for (const auto& p : parts) pp << p;
         }
         env.insert("PYTHONPATH", pp.join(sep));
-
+        env.insert("PYTHONHOME", QDir::toNativeSeparators(QFileInfo(pyExe).absolutePath()));
         m_proc->setProcessEnvironment(env);
     }
 
