@@ -32,6 +32,8 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: ${{ env.QT_ARCH }}
           cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ env.QT_ARCH }}-with-location
+          archives: 'qtbase qtdeclarative qtlocation qtpositioning'
 
       - name: Setup CMake 4.0.2 + Ninja
         uses: lukka/get-cmake@latest
