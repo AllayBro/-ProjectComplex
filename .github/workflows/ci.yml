@@ -29,15 +29,13 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
-          arch: ${{ env.QT_ARCH }}
+          version: 6.10.2
+          arch: win64_mingw
+          modules: qtlocation qtpositioning
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ env.QT_ARCH }}-with-location
-          archives: 'qtbase qtdeclarative qtlocation qtpositioning'
-
-      - name: Setup CMake 4.0.2 + Ninja
-        uses: lukka/get-cmake@latest
-        with:
+          - name: Setup CMake 4.0.2 + Ninja
+            uses: lukka/get-cmake@latest
+            with:
           cmakeVersion: 4.0.2
           ninjaVersion: latest
 
