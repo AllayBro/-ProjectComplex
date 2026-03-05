@@ -34,9 +34,10 @@ jobs:
           arch: win64_mingw
           modules: qtlocation qtpositioning
           cache: true
-          - name: Setup CMake 4.0.2 + Ninja
-            uses: lukka/get-cmake@latest
-            with:
+
+      - name: Setup CMake 4.0.2 + Ninja
+        uses: lukka/get-cmake@latest
+        with:
           cmakeVersion: 4.0.2
           ninjaVersion: latest
 
