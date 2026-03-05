@@ -42,7 +42,30 @@ class IProcessor:
 
 class VehicleDetectorStep(IProcessor):
     def run(self, ctx: DetectionContext, cfg: Dict[str, Any], dev: DeviceChoice, state: Optional[Dict[str, Any]]) -> DetectionContext:
-        model_path = str(cfg.get("detector", {}).get("model_path", "yolov8n.pt"))
+        model_path = str(
+            cfg.get("yolo_model_path")
+            or (cfg.get("detector", {}) or {}).get("model_path")
+            or ""
+        ).strip().strip('"').strip("'")
+
+        if not model_path:
+            raise RuntimeError("yolo_model_path не задан. Модель должна выбираться из папки yolo в UI.")
+
+        yolo_dir = str(cfg.get("yolo_dir", "") or "").strip().strip('"').strip("'")
+        if yolo_dir and (not os.path.isabs(model_path)):
+            model_path = os.path.join(yolo_dir, model_path)
+
+        model_path = os.path.abspath(os.path.expandvars(os.path.expanduser(model_path)))
+        if not os.path.exists(model_path):
+            raise RuntimeError(f"Файл модели YOLO не найден: {model_path}")
+
+        if yolo_dir:
+            yolo_dir_abs = os.path.abspath(os.path.expandvars(os.path.expanduser(yolo_dir)))
+            try:
+                if os.path.commonpath([yolo_dir_abs, model_path]) != yolo_dir_abs:
+                    raise RuntimeError(f"Модель должна быть внутри папки yolo: {yolo_dir_abs}. Получено: {model_path}")
+            except Exception:
+                pass
         detector = None
         if state is not None:
             detector = state.get("detector", None)

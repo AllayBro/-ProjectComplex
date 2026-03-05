@@ -259,6 +259,18 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 QString FullDistanceTab::yoloDirAbs() const {
     QFileInfo fi(m_cfg.yoloDir);
     if (fi.isAbsolute()) return QDir::cleanPath(fi.absoluteFilePath());
+
+    QDir curDir(QDir(m_appDir).absolutePath());
+    while (true) {
+        const QString cand = QDir(curDir.absolutePath()).filePath(m_cfg.yoloDir);
+        if (QDir(cand).exists()) return QDir::cleanPath(QDir(cand).absolutePath());
+
+        const QString before = curDir.absolutePath();
+        if (!curDir.cdUp()) break;
+        const QString after = curDir.absolutePath();
+        if (after == before) break;
+    }
+
     return QDir(m_appDir).filePath(m_cfg.yoloDir);
 }
 
@@ -324,7 +336,7 @@ bool FullDistanceTab::runPreviewTaskRaw(const QString& inputPath, QImage& outIma
     if (!QFileInfo(basePyCfg).exists()) { err = "python config не найден: " + basePyCfg; return false; }
     if (!QFileInfo(inputPath).exists()) { err = "input не найден: " + inputPath; return false; }
 
-    const QString workDir = QDir(tempBaseDirLocalFull()).filePath("vk_qt_app_preview_raw");
+    const QString workDir = QDir(tempBaseDirLocalFull()).filePath("traffic_preview_raw");
     QDir wd(workDir);
     if (wd.exists() && !wd.removeRecursively()) { err = "Не удалось очистить temp preview dir: " + workDir; return false; }
     if (!QDir().mkpath(workDir)) { err = "Не удалось создать temp preview dir: " + workDir; return false; }

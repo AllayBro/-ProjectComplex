@@ -13,7 +13,7 @@ struct MapConfig {
     bool startOffline = false;
     QString offlineTilesDir;
     QString cacheDir;
-    QString userAgent = "vk_qt_app/1.0";
+    QString userAgent = "traffic/1.0";
 
     int probeIntervalMs = 0;
     QString probeUrl;

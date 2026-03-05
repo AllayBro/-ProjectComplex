@@ -19,20 +19,36 @@
   </component>
   <component name="CMakeRunConfigurationManager">
     <generated>
-      <config projectName="ProjectComplex" targetName="vk_qt_app" />
+      <config projectName="ProjectComplex" targetName="traffic" />
     </generated>
   </component>
   <component name="CMakeSettings">
     <configurations>
       <configuration PROFILE_NAME="Debug" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\mingw_64" />
       <configuration PROFILE_NAME="Release" ENABLED="true" CONFIG_NAME="Release" GENERATION_OPTIONS="-DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\mingw_64" />
+      <configuration PROFILE_NAME="Debug-event-trace" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\mingw_64 --profiling-format=google-trace --profiling-output=CMakeFiles\clion-event-trace.json" />
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.4.4 - Add repain programm">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5 - Alpha Release">
+      <change afterPath="$PROJECT_DIR$/.github/workflows/ci.yml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.github/workflows/release.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/QtSettings.xml" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/app_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/app_config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/full_distance/full_distance.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/full_distance/full_distance.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/objects_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/objects_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/notebooks/speed_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/speed_detect.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/python/runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,11 +58,12 @@
   <component name="ClangdSettings">
     <option name="formatViaClangd" value="false" />
   </component>
-  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
+  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Release" />
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
         <option value="Python Script" />
+        <option value="GitHub Workflow" />
       </list>
     </option>
   </component>
@@ -89,6 +106,10 @@
     <setting file="file://$PROJECT_DIR$/src/RunnerClient.h" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/main.cpp" root0="FORCE_HIGHLIGHTING" />
   </component>
+  <component name="KubernetesApiPersistence">{}</component>
+  <component name="KubernetesApiProvider">{
+  &quot;isMigrated&quot;: true
+}</component>
   <component name="ProblemsViewState">
     <option name="selectedTabId" value="CurrentFile" />
   </component>
@@ -112,6 +133,7 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;CMake Application.traffic.executor&quot;: &quot;Run&quot;,
     &quot;CMake Application.vk_qt_app.executor&quot;: &quot;Run&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.RadMigrateCodeStyle&quot;: &quot;true&quot;,
@@ -131,7 +153,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;works.szabope.plugins.mypy.configurable.MypyConfigurable&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -151,12 +173,7 @@
     </key>
   </component>
   <component name="RunManager">
-    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
-      <method v="2">
-        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="vk_qt_app" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="vk_qt_app" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="vk_qt_app">
+    <configuration name="traffic" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="traffic" CONFIG_NAME="Release" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="traffic">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
@@ -208,7 +225,10 @@
       <workItem from="1772462740844" duration="309000" />
       <workItem from="1772515557449" duration="26854000" />
       <workItem from="1772567159988" duration="8376000" />
-      <workItem from="1772617724130" duration="17236000" />
+      <workItem from="1772617724130" duration="18664000" />
+      <workItem from="1772651247481" duration="872000" />
+      <workItem from="1772652202579" duration="637000" />
+      <workItem from="1772689748722" duration="4479000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -378,7 +398,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772638926657</updated>
     </task>
-    <option name="localTasksCounter" value="22" />
+    <task id="LOCAL-00022" summary="04.03 - v0.5 - Alpha Release">
+      <option name="closed" value="true" />
+      <created>1772649298507</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1772649298507</updated>
+    </task>
+    <option name="localTasksCounter" value="23" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -413,7 +441,8 @@
     <MESSAGE value="28.02 - v0.4.3.2 - Fix model hub" />
     <MESSAGE value="04.02 - v0.4.3.2 - Fix model hub" />
     <MESSAGE value="04.03 - v0.4.4 - Add repain programm" />
-    <option name="LAST_COMMIT_MESSAGE" value="04.03 - v0.4.4 - Add repain programm" />
+    <MESSAGE value="04.03 - v0.5 - Alpha Release" />
+    <option name="LAST_COMMIT_MESSAGE" value="04.03 - v0.5 - Alpha Release" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -426,6 +455,16 @@
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/src/RunnerClient.cpp</url>
           <option name="timeStamp" value="3" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/FullDistanceTab.cpp</url>
+          <line>334</line>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/python/runner.py</url>
+          <line>316</line>
+          <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

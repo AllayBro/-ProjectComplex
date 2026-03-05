@@ -212,7 +212,19 @@ def comp_len_near_boundary(edge_row_bool, x_boundary, x0, x1):
 def detect_vehicle_mask(img_bgr, cfg):
     # Возвращает СПИСОК объектов:
     # [{"mask":mask_uint8(H,W), "bbox":[x1,y1,x2,y2], "cls":cls_id, "conf":conf, "area":area_px}, ...]
-    model = YOLO(cfg["model_name"])
+    model_path = str(cfg.get("yolo_model_path") or cfg.get("model_name") or "").strip().strip('"').strip("'")
+    if not model_path:
+        raise RuntimeError("yolo_model_path/model_name не задан.")
+
+    yolo_dir = str(cfg.get("yolo_dir", "") or "").strip().strip('"').strip("'")
+    if yolo_dir and (not os.path.isabs(model_path)):
+        model_path = os.path.join(yolo_dir, model_path)
+
+    model_path = os.path.abspath(os.path.expandvars(os.path.expanduser(model_path)))
+    if not os.path.exists(model_path):
+        raise RuntimeError(f"Файл модели YOLO не найден: {model_path}")
+
+    model = YOLO(model_path)
     H, W = img_bgr.shape[:2]
 
     res = model.predict(

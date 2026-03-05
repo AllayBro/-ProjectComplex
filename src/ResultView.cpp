@@ -880,6 +880,55 @@ void ResultView::renderResultPixmap() {
     m_srcResult.setDevicePixelRatio(1.0);
 }
 
+static bool extractGpsLatLonFromExifRoot(const QJsonObject& exifRoot, double& lat, double& lon) {
+    lat = 0.0;
+    lon = 0.0;
+
+    QJsonObject src = exifRoot;
+    if (src.contains("runner") && src.value("runner").isObject()) src = src.value("runner").toObject();
+    else if (src.contains("file") && src.value("file").isObject()) src = src.value("file").toObject();
+
+    const QJsonObject gps = src.value("gps").toObject();
+    const QJsonValue latv = gps.value("lat");
+    const QJsonValue lonv = gps.value("lon");
+
+    bool okLat = false;
+    bool okLon = false;
+    double lt = 0.0;
+    double ln = 0.0;
+
+    if (latv.isDouble()) { lt = latv.toDouble(); okLat = true; }
+    else if (latv.isString()) { lt = latv.toString().toDouble(&okLat); }
+
+    if (lonv.isDouble()) { ln = lonv.toDouble(); okLon = true; }
+    else if (lonv.isString()) { ln = lonv.toString().toDouble(&okLon); }
+
+    if (!okLat || !okLon) return false;
+    if (!qIsFinite(lt) || !qIsFinite(ln)) return false;
+    if (lt < -90.0 || lt > 90.0) return false;
+    if (ln < -180.0 || ln > 180.0) return false;
+
+    lat = lt;
+    lon = ln;
+    return true;
+}
+
+static void injectGpsToDetections(ModuleResult& r) {
+    double lat = 0.0, lon = 0.0;
+    const bool ok = extractGpsLatLonFromExifRoot(r.exif, lat, lon);
+
+    for (auto& d : r.detections) {
+        if (!d.meta.contains("gps_lat")) {
+            if (ok) d.meta.insert("gps_lat", lat);
+            else d.meta.insert("gps_lat", QString::fromUtf8("нет данных"));
+        }
+        if (!d.meta.contains("gps_lon")) {
+            if (ok) d.meta.insert("gps_lon", lon);
+            else d.meta.insert("gps_lon", QString::fromUtf8("нет данных"));
+        }
+    }
+}
+
 void ResultView::setResult(const ModuleResult& r) {
     // Сохраняем метаданные файла, которые были извлечены при выборе изображения (setPreviewImage)
     QJsonObject fileMetaSaved;
@@ -899,7 +948,7 @@ void ResultView::setResult(const ModuleResult& r) {
         if (!m_lastResult.exif.isEmpty()) root.insert("runner", m_lastResult.exif);
         m_lastResult.exif = root;
     }
-
+    injectGpsToDetections(m_lastResult);
     rebuildDetectionsTable();
     renderResultPixmap();
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
@@ -1482,7 +1531,7 @@ void ResultView::onSaveImage() {
         }
     } else {
         const QString tmpRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-        const QString tmpDir = QDir(tmpRoot.isEmpty() ? QDir::tempPath() : tmpRoot).filePath("vk_qt_app_save");
+        const QString tmpDir = QDir(tmpRoot.isEmpty() ? QDir::tempPath() : tmpRoot).filePath("traffic_save");
         QDir().mkpath(tmpDir);
 
         const QString tmpPng = QDir(tmpDir).filePath("tmp_save_result.png");

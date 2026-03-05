@@ -25,6 +25,10 @@
 #include <QtNetwork/QNetworkRequest>
 #include <QTimer>
 #include <QUrl>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QJsonDocument>
+#include <QJsonParseError>
 
 static QString qmlMapView() {
     return QString::fromUtf8(R"QML(
@@ -41,7 +45,7 @@ Item {
     property bool offlineMode: false
     property string offlineDir: ""
     property string cacheDir: ""
-    property string userAgent: "vk_qt_app"
+    property string userAgent: "traffic"
 
     signal markerClicked(string imagePath)
 
@@ -170,6 +174,90 @@ Item {
     }
 }
 )QML");
+}
+
+static QString absPathLocalMap(const QString& appDir, const QString& relOrAbs) {
+    QFileInfo fi(relOrAbs);
+    if (fi.isAbsolute()) return fi.absoluteFilePath();
+    return QDir(appDir).filePath(relOrAbs);
+}
+
+static QString tempBaseDirLocalMap() {
+    QString d = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (d.isEmpty()) d = QDir::tempPath();
+    if (d.isEmpty()) d = QDir::homePath();
+    return d;
+}
+
+static bool readExifViaRunnerPreviewMap(const AppConfig& cfg,
+                                        const QString& inputPath,
+                                        QJsonObject& outExif,
+                                        QString& err) {
+    outExif = QJsonObject();
+    err.clear();
+
+    const QString py = cfg.pythonExe.trimmed().isEmpty() ? "python" : cfg.pythonExe.trimmed();
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString runner = absPathLocalMap(appDir, cfg.runnerScript);
+    const QString basePyCfg = absPathLocalMap(appDir, cfg.pythonConfigJson);
+
+    if (!QFileInfo(runner).exists()) { err = "runner.py не найден: " + runner; return false; }
+    if (!QFileInfo(basePyCfg).exists()) { err = "python config не найден: " + basePyCfg; return false; }
+    if (!QFileInfo(inputPath).exists()) { err = "input не найден: " + inputPath; return false; }
+
+    const QString workDir = QDir(tempBaseDirLocalMap()).filePath("vk_qt_app_map_exif_preview");
+    QDir wd(workDir);
+    if (wd.exists() && !wd.removeRecursively()) { err = "Не удалось очистить temp dir: " + workDir; return false; }
+    if (!QDir().mkpath(workDir)) { err = "Не удалось создать temp dir: " + workDir; return false; }
+
+    const QString resultJson = QDir(workDir).filePath("preview.json");
+
+    QProcess proc;
+    QStringList args;
+    args << "-u" << "-X" << "faulthandler"
+         << runner
+         << "--task" << "preview"
+         << "--input" << inputPath
+         << "--output-dir" << workDir
+         << "--device" << "auto"
+         << "--config" << basePyCfg
+         << "--result-json" << resultJson;
+
+    proc.start(py, args);
+    if (!proc.waitForFinished(-1)) {
+        err = "preview: процесс не завершился";
+        wd.removeRecursively();
+        return false;
+    }
+
+    if (!QFileInfo(resultJson).exists()) {
+        err = "preview: result_json не создан. stderr=" + QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        wd.removeRecursively();
+        return false;
+    }
+
+    QFile f(resultJson);
+    if (!f.open(QIODevice::ReadOnly)) {
+        err = "preview: не открыть result_json: " + resultJson;
+        wd.removeRecursively();
+        return false;
+    }
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    f.close();
+
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
+        err = "preview: JSON parse error: " + pe.errorString();
+        wd.removeRecursively();
+        return false;
+    }
+
+    const QJsonObject root = doc.object();
+    outExif = root.value("exif").toObject();
+
+    wd.removeRecursively();
+    return !outExif.isEmpty();
 }
 
 MapTab::MapTab(const AppConfig& cfg, QWidget* parent)    : QWidget(parent), m_cfg(cfg)
@@ -507,7 +595,18 @@ void MapTab::onImageSelected(const QString& imagePath)
 
     Item it;
     it.imagePath = fi.absoluteFilePath();
+
+    // 1) быстрый JPEG-EXIF
     readExifMini(it.imagePath, it);
+
+    // 2) fallback: python preview EXIF (для HEIC/HEIF и др.)
+    if (!it.hasGps) {
+        QJsonObject exifObj;
+        QString err;
+        if (readExifViaRunnerPreviewMap(m_cfg, it.imagePath, exifObj, err)) {
+            applyRunnerExif(exifObj, it);
+        }
+    }
 
     m_items.insert(it.imagePath, it);
     pushModelToQml();

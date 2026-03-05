@@ -70,7 +70,7 @@ static bool ensureEmptyDir(const QString& dirPath, QString& err) {
 }
 
 static QString makeWorkDir(const QString& subDir, QString& err) {
-    const QString root = QDir(tempBaseDir()).filePath("vk_qt_app_work");
+    const QString root = QDir(tempBaseDir()).filePath("traffic_work");
     const QString full = QDir(root).filePath(subDir);
     if (!ensureEmptyDir(full, err)) return {};
     return full;
@@ -93,7 +93,7 @@ static bool isInsideDir(const QString& child, const QString& parent) {
 
 static void cleanupWorkDirIfTemp(const QString& dirPath) {
     if (dirPath.trimmed().isEmpty()) return;
-    const QString root = QDir(tempBaseDir()).filePath("vk_qt_app_work");
+    const QString root = QDir(tempBaseDir()).filePath("traffic_work");
     if (!isInsideDir(dirPath, root)) return;
     QDir(dirPath).removeRecursively();
 }
@@ -164,6 +164,24 @@ static void flushTail(QString& buffer, const std::function<void(const QString&)>
     buffer.clear();
 }
 
+static QString resolveExistingDirUp(const QString& startDir, const QString& relOrAbs) {
+    QFileInfo fi(relOrAbs);
+    if (fi.isAbsolute()) return QDir::cleanPath(fi.absoluteFilePath());
+
+    QDir curDir(QDir(startDir).absolutePath());
+    while (true) {
+        const QString cand = QDir(curDir.absolutePath()).filePath(relOrAbs);
+        if (QDir(cand).exists()) return QDir::cleanPath(QDir(cand).absolutePath());
+
+        const QString before = curDir.absolutePath();
+        if (!curDir.cdUp()) break;
+        const QString after = curDir.absolutePath();
+        if (after == before) break;
+    }
+
+    return QDir(startDir).filePath(relOrAbs);
+}
+
 RunnerClient::RunnerClient(const AppConfig& cfg, const QString& appDirPath, QObject* parent)
     : QObject(parent), m_cfg(cfg), m_appDir(appDirPath) {}
 
@@ -200,7 +218,7 @@ void RunnerClient::runCluster(int clusterId,
     if (!readJsonObjectFile(basePyCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QJsonObject patch = m_cfg.toRunConfigPatch(deviceMode);
-    patch.insert("yolo_dir", absPath(m_appDir, m_cfg.yoloDir));
+    patch.insert("yolo_dir", resolveExistingDirUp(m_appDir, m_cfg.yoloDir));
     patch.insert("yolo_model_path", yoloAbs);
     deepMergeInto(cfgObj, patch);
 
@@ -243,7 +261,7 @@ void RunnerClient::runFullDistance(const QString& imagePath,
     if (!readJsonObjectFile(basePyCfg, cfgObj, cfgErr)) { emit finishedError(cfgErr); return; }
 
     QJsonObject patch = m_cfg.toRunConfigPatch(deviceMode);
-    patch.insert("yolo_dir", absPath(m_appDir, m_cfg.yoloDir));
+    patch.insert("yolo_dir", resolveExistingDirUp(m_appDir, m_cfg.yoloDir));
     patch.insert("yolo_model_path", yoloAbs);
     deepMergeInto(cfgObj, patch);
 

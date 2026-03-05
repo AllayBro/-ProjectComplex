@@ -153,7 +153,17 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     module_id = str(cfg.get("module_id", "objects_detect"))
 
-    model_path = str(cfg.get("model_path", cfg.get("yolo_model_path", "yolov8m.pt")))
+    model_path = str(cfg.get("yolo_model_path") or cfg.get("model_path") or "").strip().strip('"').strip("'")
+    if not model_path:
+        raise RuntimeError("yolo_model_path не задан. Модель должна выбираться из папки yolo в UI.")
+
+    yolo_dir = str(cfg.get("yolo_dir", "") or "").strip().strip('"').strip("'")
+    if yolo_dir and (not os.path.isabs(model_path)):
+        model_path = os.path.join(yolo_dir, model_path)
+
+    model_path = os.path.abspath(os.path.expandvars(os.path.expanduser(model_path)))
+    if not os.path.exists(model_path):
+        raise RuntimeError(f"Файл модели YOLO не найден: {model_path}")
 
     imgsz = int(cfg.get("yolo_imgsz", cfg.get("imgsz", YOLO_IMGSZ_DEFAULT)))
     conf_global = float(cfg.get("yolo_conf_global", cfg.get("conf_global", YOLO_CONF_GLOBAL_DEFAULT)))

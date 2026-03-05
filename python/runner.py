@@ -319,7 +319,7 @@ def main() -> int:
 
     if len(sys.argv) == 1:
         ap.print_help()
-        print("Этот скрипт запускается из Qt-приложения vk_qt_app.exe")
+        print("Этот скрипт запускается из Qt-приложения traffic.exe")
         return 0
 
     if any(a in ("-h", "--help") for a in sys.argv[1:]):

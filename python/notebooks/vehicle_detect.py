@@ -112,7 +112,7 @@ def _hf_default_cache_dir() -> Path:
     base = os.environ.get("VK_HF_CACHE_DIR", "")
     if base.strip():
         return Path(base).expanduser()
-    return Path.home() / ".cache" / "vk_qt_app" / "hf_weights"
+    return Path.home() / ".cache" / "traffic" / "hf_weights"
 
 def ensure_hf_weight(hf_url: str, prefer_path: str | None = None) -> str:
     if prefer_path:

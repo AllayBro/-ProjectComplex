@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
 
     app.setFont(QFont("Segoe UI", 9));
     QCoreApplication::setOrganizationName("AllayBro");
-    QCoreApplication::setApplicationName("vk_qt_app");
+    QCoreApplication::setApplicationName("traffic");
 
     const QString appDir = QCoreApplication::applicationDirPath();
     QDir rootDir(appDir);

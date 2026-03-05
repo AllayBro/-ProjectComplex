@@ -23,7 +23,7 @@ find_package(Qt6 REQUIRED COMPONENTS
         Positioning
 )
 
-add_executable(vk_qt_app
+add_executable(traffic
         src/main.cpp
 
         src/MainWindow.h src/MainWindow.cpp
@@ -44,7 +44,7 @@ add_executable(vk_qt_app
 
 set_source_files_properties(src/ModelTypes.cpp PROPERTIES SKIP_AUTOMOC ON)
 
-target_link_libraries(vk_qt_app PRIVATE
+target_link_libraries(traffic PRIVATE
         Qt6::Widgets
         Qt6::Sql
         Qt6::Quick
@@ -73,41 +73,41 @@ if (WIN32)
 
     find_program(_windeployqt_exe NAMES windeployqt HINTS "${_qt6_bin_dir}" REQUIRED)
 
-    add_custom_command(TARGET vk_qt_app POST_BUILD
+    add_custom_command(TARGET traffic POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/config"
-            "$<TARGET_FILE_DIR:vk_qt_app>/config"
+            "$<TARGET_FILE_DIR:traffic>/config"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/python"
-            "$<TARGET_FILE_DIR:vk_qt_app>/python"
+            "$<TARGET_FILE_DIR:traffic>/python"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:vk_qt_app>/assets"
+            "$<TARGET_FILE_DIR:traffic>/assets"
 
             COMMAND "${_windeployqt_exe}"
             --release
             --no-translations
             --compiler-runtime
             --qmldir "${CMAKE_SOURCE_DIR}"
-            --dir "$<TARGET_FILE_DIR:vk_qt_app>"
-            "$<TARGET_FILE:vk_qt_app>"
+            --dir "$<TARGET_FILE_DIR:traffic>"
+            "$<TARGET_FILE:traffic>"
             VERBATIM
     )
 else()
-    add_custom_command(TARGET vk_qt_app POST_BUILD
+    add_custom_command(TARGET traffic POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/config"
-            "$<TARGET_FILE_DIR:vk_qt_app>/config"
+            "$<TARGET_FILE_DIR:traffic>/config"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/python"
-            "$<TARGET_FILE_DIR:vk_qt_app>/python"
+            "$<TARGET_FILE_DIR:traffic>/python"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:vk_qt_app>/assets"
+            "$<TARGET_FILE_DIR:traffic>/assets"
             VERBATIM
     )
 endif()

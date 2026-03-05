@@ -14,6 +14,6 @@
     "start_offline": false,
     "offline_tiles_dir": "",
     "cache_dir": "",
-    "user_agent": "vk_qt_app"
+    "user_agent": "traffic"
   }
 }

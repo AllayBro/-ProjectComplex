@@ -1,0 +1,78 @@
+name: Release Traffic
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    env:
+      QT_VERSION: "6.10.2"
+      QT_ARCH: "win64_mingw"
+      APP_TARGET: "traffic"
+      BUILD_DIR: "build-release"
+      DIST_ROOT: "dist"
+      DIST_DIR: "dist\\traffic"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ env.QT_ARCH }}
+          cache: true
+
+      - name: Configure (CMake Release)
+        shell: cmd
+        run: |
+          cmake -S . -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Release)
+        shell: cmd
+        run: |
+          cmake --build "%BUILD_DIR%" --parallel
+
+      - name: Prepare portable folder (windeployqt)
+        shell: cmd
+        run: |
+          if exist "%DIST_ROOT%" rmdir /S /Q "%DIST_ROOT%"
+          mkdir "%DIST_DIR%"
+
+          set "APP_EXE="
+          for /r "%BUILD_DIR%" %%F in ("%APP_TARGET%.exe") do (
+            set "APP_EXE=%%F"
+            goto :found
+          )
+          :found
+          if "%APP_EXE%"=="" (
+            echo [ERROR] %APP_TARGET%.exe not found under %BUILD_DIR%
+            exit /b 1
+          )
+
+          copy /Y "%APP_EXE%" "%DIST_DIR%\\%APP_TARGET%.exe"
+
+          windeployqt --release --no-translations --compiler-runtime --qmldir "%GITHUB_WORKSPACE%" "%DIST_DIR%\\%APP_TARGET%.exe"
+
+          if exist "python" xcopy /E /I /Y "python" "%DIST_DIR%\\python"
+          if exist "yolo"   xcopy /E /I /Y "yolo"   "%DIST_DIR%\\yolo"
+          if exist "config" xcopy /E /I /Y "config" "%DIST_DIR%\\config"
+
+      - name: Create zip
+        shell: cmd
+        run: |
+          echo PACKAGE_NAME=%APP_TARGET%-%GITHUB_REF_NAME%-windows-mingw.zip>>%GITHUB_ENV%
+          cmake -E tar cfv "%APP_TARGET%-%GITHUB_REF_NAME%-windows-mingw.zip" --format=zip "%DIST_DIR%"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_NAME }}

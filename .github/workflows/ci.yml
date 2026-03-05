@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    env:
+      QT_VERSION: "6.10.2"
+      QT_ARCH: "win64_mingw"
+      APP_TARGET: "traffic"
+      BUILD_DIR: "build-${{ matrix.build_type }}"
+      BUILD_TYPE: "${{ matrix.build_type }}"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ env.QT_ARCH }}
+          cache: true
+
+      - name: Configure (CMake)
+        shell: cmd
+        run: |
+          cmake -S . -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+
+      - name: Build
+        shell: cmd
+        run: |
+          cmake --build "%BUILD_DIR%" --parallel
+
+      - name: Test (ctest)
+        shell: cmd
+        run: |
+          ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
+
+      - name: Upload artifact (Release exe)
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-mingw-${{ env.APP_TARGET }}-${{ github.sha }}
+          path: |
+            ${{ env.BUILD_DIR }}\**\${{ env.APP_TARGET }}.exe
