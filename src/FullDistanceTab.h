@@ -1,4 +1,5 @@
 #pragma once
+
 #include <QWidget>
 #include <QString>
 #include <QLineEdit>
@@ -46,6 +47,5 @@ private:
     QString yoloDirAbs() const;
     void reloadYoloModels();
     QString currentYoloModelPath() const;
-
     void bindRunner();
 };

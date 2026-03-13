@@ -19,8 +19,8 @@ class ClustersTab : public QWidget {
 public:
     explicit ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent = nullptr);
 
-    signals:
-        void imageSelected(const QString& imagePath);
+signals:
+    void imageSelected(const QString& imagePath);
     void resultReady(const QString& imagePath, const ModuleResult& result);
 
 private:

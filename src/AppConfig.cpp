@@ -1,6 +1,8 @@
 #include "AppConfig.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QDebug>
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -54,7 +56,10 @@ AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
 
     cfg.yoloModelPath = o.value("yolo_model_path").toString("yolo11n.pt").trimmed();
     if (cfg.yoloModelPath.isEmpty()) cfg.yoloModelPath = "yolo11n.pt";
-
+    QString yoloErr;
+    if (!cfg.ensureYoloDirExists(appDirPath, &yoloErr)) {
+        qWarning().noquote() << yoloErr;
+    }
     cfg.clusters.clear();
     const QJsonArray ca = o.value("clusters").toArray();
     if (ca.size() != 4) qFatal("Config must contain exactly 4 clusters in config/app_config.json");
@@ -100,6 +105,28 @@ AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
     if (cfg.map.probeTimeoutMs <= 0) cfg.map.probeTimeoutMs = 5000;
 
     return cfg;
+}
+
+QString AppConfig::yoloDirAbsolute(const QString& appDirPath) const {
+    QFileInfo fi(yoloDir);
+    if (fi.isAbsolute()) return QDir::cleanPath(fi.absoluteFilePath());
+    return QDir(appDirPath).filePath(yoloDir);
+}
+
+bool AppConfig::ensureYoloDirExists(const QString& appDirPath, QString* errorText) const {
+    const QString dirPath = yoloDirAbsolute(appDirPath);
+    if (dirPath.trimmed().isEmpty()) {
+        if (errorText) *errorText = "Путь yolo_dir пуст.";
+        return false;
+    }
+
+    QDir d(dirPath);
+    if (d.exists()) return true;
+
+    if (QDir().mkpath(dirPath)) return true;
+
+    if (errorText) *errorText = "Не удалось создать папку YOLO: " + dirPath;
+    return false;
 }
 
 QJsonObject AppConfig::toRunConfigPatch(const QString& deviceMode) const {

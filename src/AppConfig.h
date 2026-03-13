@@ -37,6 +37,8 @@ public:
     static AppConfig loadOrDie(const QString& appDirPath);
 
     QJsonObject toRunConfigPatch(const QString& deviceMode) const;
+    QString yoloDirAbsolute(const QString& appDirPath) const;
+    bool ensureYoloDirExists(const QString& appDirPath, QString* errorText = nullptr) const;
 
 private:
     static QString readAllText(const QString& path);

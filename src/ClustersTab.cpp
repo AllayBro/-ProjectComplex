@@ -4,7 +4,6 @@
 #include "ResultView.h"
 
 #include <QScrollArea>
-#include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFileDialog>
 #include <QDir>
@@ -19,6 +18,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QFile>
+#include <QMessageBox>
 
 static QString uiIniPathClusters() {
     return QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
@@ -62,32 +62,52 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     : QWidget(parent), m_cfg(cfg), m_appDir(appDir) {
 
     m_runner = new RunnerClient(cfg, appDir, this);
+    const int topCtrlH = 34;
+    const int actionBtnH = 42;
+    QString yoloErr;
+    m_cfg.ensureYoloDirExists(m_appDir, &yoloErr);
 
     auto* root = new QVBoxLayout(this);
 
     auto* row1 = new QHBoxLayout();
     m_input = new QLineEdit();
+    m_input->setFixedHeight(topCtrlH);
+
     m_browse = new QPushButton("Выбрать фото");
+    m_browse->setFixedHeight(topCtrlH);
     row1->addWidget(m_input, 1);
     row1->addWidget(m_browse);
 
     auto* row2 = new QHBoxLayout();
     m_yoloModel = new QComboBox();
     m_yoloModel->setEditable(true);
+    m_yoloModel->setFixedHeight(topCtrlH);
+
     m_browseYolo = new QPushButton("Модель YOLO");
+    m_browseYolo->setFixedHeight(topCtrlH);
+
     row2->addWidget(m_yoloModel, 1);
     row2->addWidget(m_browseYolo);
-
     auto* row3 = new QHBoxLayout();
+    row3->setContentsMargins(0, 0, 0, 0);
+    row3->setSpacing(8);
+
+    auto* deviceLabel = new QLabel("Device:");
+    deviceLabel->setFixedHeight(topCtrlH);
+    deviceLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+
     m_device = new QComboBox();
     m_device->addItems({"auto", "gpu", "cpu"});
-    row3->addWidget(new QLabel("Device:"));
-    row3->addWidget(m_device);
+    m_device->setFixedSize(140, topCtrlH);
+
+    row3->addWidget(deviceLabel);
+    row3->addWidget(m_device, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    row3->addStretch(1);
 
     auto* rowBtns = new QHBoxLayout();
     for (const auto& c : m_cfg.clusters) {
         auto* b = new QPushButton(QString::number(c.clusterId) + ": " + c.title);
-        b->setMinimumHeight(42);
+        b->setFixedHeight(actionBtnH);
         m_clusterButtons.push_back(b);
         rowBtns->addWidget(b);
     }
@@ -117,7 +137,6 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             QSignalBlocker b(m_yoloModel);
             m_yoloModel->setEditText(lastYolo);
         }
-
         if (!lastIn.isEmpty() && QFileInfo(lastIn).exists()) {
             QSignalBlocker b(m_input);
             m_input->setText(lastIn);
@@ -172,11 +191,19 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         applyPreview(fi.absoluteFilePath());
         emit imageSelected(fi.absoluteFilePath());
     });
-
     connect(m_browseYolo, &QPushButton::clicked, this, [this] {
+        QString yoloErr;
+        if (!m_cfg.ensureYoloDirExists(m_appDir, &yoloErr)) {
+            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
+            return;
+        }
+
+        reloadYoloModels();
+
         const QString ydir = yoloDirAbs();
-        if (ydir.isEmpty() || !QDir(ydir).exists()) {
-            m_view->logEdit()->append("Ошибка: папка yolo_dir не найдена: " + ydir);
+        const QStringList models = QDir(ydir).entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
+        if (models.isEmpty()) {
+            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
             return;
         }
 
@@ -189,7 +216,7 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         if (p.isEmpty()) return;
 
         if (!isPathInsideDirOrUnknown(p, ydir)) {
-            m_view->logEdit()->append("Ошибка: модель должна быть внутри папки: " + ydir);
+            QMessageBox::warning(this, "YOLO", "Модель должна быть внутри папки yolo.");
             return;
         }
 
@@ -203,9 +230,40 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         s.sync();
     });
 
-    connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString& t) {
-        const QString p = t.trimmed();
+    connect(m_browseYolo, &QPushButton::clicked, this, [this] {
+        QString yoloErr;
+        if (!m_cfg.ensureYoloDirExists(m_appDir, &yoloErr)) {
+            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
+            return;
+        }
+
+        reloadYoloModels();
+
+        const QString ydir = yoloDirAbs();
+        const QStringList models = QDir(ydir).entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
+        if (models.isEmpty()) {
+            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
+            return;
+        }
+
+        const QString p = QFileDialog::getOpenFileName(
+            this,
+            "Выберите модель YOLO",
+            ydir,
+            "YOLO weights (*.pt *.onnx)"
+        );
         if (p.isEmpty()) return;
+
+        if (!isPathInsideDirOrUnknown(p, ydir)) {
+            QMessageBox::warning(this, "YOLO", "Модель должна быть внутри папки yolo.");
+            return;
+        }
+
+        if (m_yoloModel) {
+            QSignalBlocker b(m_yoloModel);
+            m_yoloModel->setEditText(p);
+        }
+
         QSettings s(uiIniPathClusters(), QSettings::IniFormat);
         s.setValue("ui/last_yolo_model_path", p);
         s.sync();
@@ -224,18 +282,14 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             const QString out;
 
             const QString yolo = currentYoloModelPath();
-            if (in.isEmpty()) {
-                m_view->logEdit()->append("Ошибка: задайте фото.");
-                return;
-            }
             if (yolo.isEmpty() || !QFileInfo(yolo).exists()) {
-                m_view->logEdit()->append("Ошибка: выберите модель YOLO (*.pt/*.onnx) из папки yolo_dir.");
+                QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
                 return;
             }
 
             const QString ydir = yoloDirAbs();
             if (!isPathInsideDirOrUnknown(yolo, ydir)) {
-                m_view->logEdit()->append("Ошибка: модель должна быть внутри папки: " + ydir);
+                QMessageBox::warning(this, "YOLO", "Модель должна быть внутри папки yolo.");
                 return;
             }
 
@@ -250,9 +304,6 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
 }
 
 QString ClustersTab::yoloDirAbs() const {
-    QFileInfo fi(m_cfg.yoloDir);
-    if (fi.isAbsolute()) return QDir::cleanPath(fi.absoluteFilePath());
-
     QDir curDir(QDir(m_appDir).absolutePath());
     while (true) {
         const QString cand = QDir(curDir.absolutePath()).filePath(m_cfg.yoloDir);
@@ -263,23 +314,36 @@ QString ClustersTab::yoloDirAbs() const {
         const QString after = curDir.absolutePath();
         if (after == before) break;
     }
-
-    return QDir(m_appDir).filePath(m_cfg.yoloDir);
+    return m_cfg.yoloDirAbsolute(m_appDir);
 }
 
 void ClustersTab::reloadYoloModels() {
     if (!m_yoloModel) return;
 
+    const QString currentText = m_yoloModel->currentText().trimmed();
+
+    QString yoloErr;
+    m_cfg.ensureYoloDirExists(m_appDir, &yoloErr);
+
     const QString ydir = yoloDirAbs();
     QDir d(ydir);
 
     QStringList files;
-    files << d.entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
+    if (d.exists()) {
+        files = d.entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
+    }
 
     QSignalBlocker b(m_yoloModel);
     m_yoloModel->clear();
     for (const QString& fn : files) {
-        m_yoloModel->addItem(fn, d.filePath(fn));
+        const QString abs = d.filePath(fn);
+        m_yoloModel->addItem(fn, abs);
+    }
+
+    if (!currentText.isEmpty()) {
+        m_yoloModel->setEditText(currentText);
+    } else if (m_yoloModel->count() > 0) {
+        m_yoloModel->setCurrentIndex(0);
     }
 }
 
@@ -298,6 +362,7 @@ QString ClustersTab::currentYoloModelPath() const {
     }
     return fi.absoluteFilePath();
 }
+
 
 static QString absPathLocal(const QString& appDir, const QString& relOrAbs) {
     QFileInfo fi(relOrAbs);
