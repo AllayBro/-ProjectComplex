@@ -1,10 +1,12 @@
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
-
+from .camera_refine import refine_camera_pose
+from .vehicle_geo_projection import project_primary_vehicle
 from prototypes.api import (
     now_ms,
     ensure_dir,
@@ -160,10 +162,49 @@ def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "
             ctx = pipe.run(ctx, cfg, dev, state)
         else:
             raise
-
     annotated = draw_annotated(img, ctx.detections)
     annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_full.jpg"))
     cv2.imwrite(annotated_path, annotated)
+
+    camera_refine_cfg = cfg.get("camera_refine", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(camera_refine_cfg, dict):
+        camera_refine_cfg = {}
+
+    camera_refine = refine_camera_pose(
+        image_path=image_path,
+        detections=ctx.detections,
+        image_w=int(w),
+        image_h=int(h),
+        cfg=camera_refine_cfg,
+        artifacts=ctx.artifacts,
+    )
+
+    camera_refine_json_path = os.path.abspath(os.path.join(out_dir, "camera_refine.json"))
+    camera_refine["refine_debug_path"] = camera_refine_json_path
+    with open(camera_refine_json_path, "w", encoding="utf-8") as f:
+        json.dump(camera_refine, f, ensure_ascii=False, indent=2)
+
+    ctx.artifacts["camera_refine"] = camera_refine
+    ctx.artifacts["camera_refine_json_path"] = camera_refine_json_path
+
+    vehicle_geo_cfg = cfg.get("vehicle_geo", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(vehicle_geo_cfg, dict):
+        vehicle_geo_cfg = {}
+
+    vehicle_geo = project_primary_vehicle(
+        camera_refine=camera_refine,
+        artifacts=ctx.artifacts,
+        image_w=int(w),
+        image_h=int(h),
+        cfg=vehicle_geo_cfg,
+    )
+
+    vehicle_geo_json_path = os.path.abspath(os.path.join(out_dir, "vehicle_geo.json"))
+    with open(vehicle_geo_json_path, "w", encoding="utf-8") as f:
+        json.dump(vehicle_geo, f, ensure_ascii=False, indent=2)
+
+    ctx.artifacts["vehicle_geo"] = vehicle_geo
+    ctx.artifacts["vehicle_geo_json_path"] = vehicle_geo_json_path
 
     cleaned_path = str(ctx.artifacts.get("cleaned_image_path", ""))
     csv_path = str(ctx.artifacts.get("csv_path", ""))
@@ -185,7 +226,7 @@ def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "
         "warnings": warnings,
         "annotated_image_path": annotated_path,
         "cleaned_image_path": cleaned_path,
-        "artifacts": {"csv_path": csv_path} if csv_path else {},
+        "artifacts": dict(ctx.artifacts),
         "timings_ms": dict(ctx.timings_ms),
         "detections": ctx.detections
     }

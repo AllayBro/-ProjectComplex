@@ -45,6 +45,15 @@ AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
     cfg.pythonExe = o.value("python_exe").toString("python").trimmed();
     if (cfg.pythonExe.isEmpty()) cfg.pythonExe = "python";
 
+    // Если указано просто "python", пытаемся найти полный путь к исполняемому файлу,
+    // чтобы избежать конфликта с папкой "python/" в директории приложения на Windows.
+    if (cfg.pythonExe == "python") {
+        QString found = QStandardPaths::findExecutable("python");
+        if (!found.isEmpty()) {
+            cfg.pythonExe = found;
+        }
+    }
+
     cfg.runnerScript = o.value("runner_script").toString("python/runner.py").trimmed();
     if (cfg.runnerScript.isEmpty()) cfg.runnerScript = "python/runner.py";
 

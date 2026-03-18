@@ -310,7 +310,14 @@ void RunnerClient::startProcess(const QStringList& args) {
     m_runLog.close();
     m_runLogPath.clear();
 
-    const QString pyExe = absPath(m_appDir, m_cfg.pythonExe);
+    // Важно для Windows: если pythonExe задан как "python" (без пути),
+    // то absPath(appDir, "python") ошибочно указывает на папку "python/" рядом с приложением.
+    QString pyExe = m_cfg.pythonExe.trimmed();
+    if (pyExe.isEmpty()) pyExe = "python";
+    const bool hasDirSep = pyExe.contains('/') || pyExe.contains('\\');
+    if (QFileInfo(pyExe).isAbsolute() || hasDirSep) {
+        pyExe = absPath(m_appDir, pyExe);
+    }
     m_proc->setProgram(pyExe);
 
     QStringList fullArgs;
@@ -345,7 +352,11 @@ void RunnerClient::startProcess(const QStringList& args) {
             for (const auto& p : parts) pp << p;
         }
         env.insert("PYTHONPATH", pp.join(sep));
-        env.insert("PYTHONHOME", QDir::toNativeSeparators(QFileInfo(pyExe).absolutePath()));
+        // PYTHONHOME корректно задавать только если известен реальный путь к python.exe
+        const QFileInfo pyFi(pyExe);
+        if (pyFi.isAbsolute() && pyFi.exists() && pyFi.isFile()) {
+            env.insert("PYTHONHOME", QDir::toNativeSeparators(pyFi.absolutePath()));
+        }
         m_proc->setProcessEnvironment(env);
     }
 

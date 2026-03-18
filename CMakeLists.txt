@@ -42,6 +42,10 @@ add_executable(traffic
         src/app.rc
 )
 
+if (WIN32)
+    set_target_properties(traffic PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
 set_source_files_properties(src/ModelTypes.cpp PROPERTIES SKIP_AUTOMOC ON)
 
 target_link_libraries(traffic PRIVATE
@@ -79,7 +83,7 @@ if (WIN32)
             "$<TARGET_FILE_DIR:traffic>/config"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_SOURCE_DIR}/python"
+            "${CMAKE_SOURCE_DIR}/py_src"
             "$<TARGET_FILE_DIR:traffic>/python"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -102,7 +106,7 @@ else()
             "$<TARGET_FILE_DIR:traffic>/config"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_SOURCE_DIR}/python"
+            "${CMAKE_SOURCE_DIR}/py_src"
             "$<TARGET_FILE_DIR:traffic>/python"
 
             COMMAND "${CMAKE_COMMAND}" -E copy_directory

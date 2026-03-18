@@ -19,6 +19,7 @@
 #include <QJsonParseError>
 #include <QFile>
 #include <QMessageBox>
+#include <QCryptographicHash>
 
 static QString uiIniPathClusters() {
     return QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
@@ -57,6 +58,130 @@ static bool isPathInsideDirOrUnknown(const QString& filePath, const QString& dir
 #endif
 }
 
+static QByteArray sha256OfFile(const QString& path, QString* errorText = nullptr) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (errorText) *errorText = "Не удалось открыть файл модели: " + path;
+        return {};
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!f.atEnd()) {
+        const QByteArray chunk = f.read(1024 * 1024);
+        if (chunk.isEmpty() && f.error() != QFile::NoError) {
+            if (errorText) *errorText = "Ошибка чтения файла модели: " + path;
+            return {};
+        }
+        hash.addData(chunk);
+    }
+    return hash.result();
+}
+
+static QString findSameModelByContent(const QString& sourcePath, const QString& yoloDir, QString* errorText = nullptr) {
+    const QByteArray srcHash = sha256OfFile(sourcePath, errorText);
+    if (srcHash.isEmpty()) return {};
+
+    QDir d(yoloDir);
+    const QStringList files = d.entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
+    for (const QString& fn : files) {
+        const QString abs = d.filePath(fn);
+        QString hashErr;
+        const QByteArray curHash = sha256OfFile(abs, &hashErr);
+        if (!hashErr.isEmpty()) {
+            if (errorText) *errorText = hashErr;
+            return {};
+        }
+        if (curHash == srcHash) {
+            return QDir::cleanPath(QFileInfo(abs).absoluteFilePath());
+        }
+    }
+
+    return {};
+}
+
+static QString uniqueModelTargetPath(const QString& yoloDir, const QString& sourcePath) {
+    const QFileInfo fi(sourcePath);
+    const QString base = fi.completeBaseName();
+    const QString ext = fi.suffix();
+
+    QString candidate = QDir(yoloDir).filePath(fi.fileName());
+    if (!QFileInfo::exists(candidate)) {
+        return QDir::cleanPath(candidate);
+    }
+
+    for (int i = 2; ; ++i) {
+        const QString fileName = ext.isEmpty()
+            ? QString("%1_%2").arg(base).arg(i)
+            : QString("%1_%2.%3").arg(base).arg(i).arg(ext);
+
+        candidate = QDir(yoloDir).filePath(fileName);
+        if (!QFileInfo::exists(candidate)) {
+            return QDir::cleanPath(candidate);
+        }
+    }
+}
+
+static QString importYoloModelToDir(const QString& selectedPath, const QString& yoloDir, QString* errorText = nullptr) {
+    if (selectedPath.trimmed().isEmpty()) {
+        if (errorText) *errorText = "Файл модели не выбран.";
+        return {};
+    }
+
+    const QString srcAbs = QDir::cleanPath(QFileInfo(selectedPath).absoluteFilePath());
+    if (!QFileInfo(srcAbs).exists()) {
+        if (errorText) *errorText = "Файл модели не найден: " + srcAbs;
+        return {};
+    }
+
+    if (isPathInsideDirOrUnknown(srcAbs, yoloDir)) {
+        return srcAbs;
+    }
+
+    QString dupErr;
+    const QString sameExisting = findSameModelByContent(srcAbs, yoloDir, &dupErr);
+    if (!dupErr.isEmpty()) {
+        if (errorText) *errorText = dupErr;
+        return {};
+    }
+    if (!sameExisting.isEmpty()) {
+        return sameExisting;
+    }
+
+    const QString dstAbs = uniqueModelTargetPath(yoloDir, srcAbs);
+    if (!QFile::copy(srcAbs, dstAbs)) {
+        if (errorText) *errorText = "Не удалось скопировать модель в папку yolo: " + dstAbs;
+        return {};
+    }
+
+    return dstAbs;
+}
+
+static void selectYoloInCombo(QComboBox* combo, const QString& absPath) {
+    if (!combo) return;
+
+    const QString target = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+    const QString targetName = QFileInfo(target).fileName();
+
+    for (int i = 0; i < combo->count(); ++i) {
+        const QString dataPath = QDir::cleanPath(combo->itemData(i).toString());
+        const QString textName = combo->itemText(i).trimmed();
+
+#ifdef Q_OS_WIN
+        const bool sameData = (QString::compare(dataPath, target, Qt::CaseInsensitive) == 0);
+        const bool sameName = (QString::compare(textName, targetName, Qt::CaseInsensitive) == 0);
+#else
+        const bool sameData = (dataPath == target);
+        const bool sameName = (textName == targetName);
+#endif
+
+        if (sameData || sameName) {
+            combo->setCurrentIndex(i);
+            return;
+        }
+    }
+
+    combo->setEditText(target);
+}
 
 ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent)
     : QWidget(parent), m_cfg(cfg), m_appDir(appDir) {
@@ -176,6 +301,15 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         }
     });
 
+    connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString&) {
+    const QString p = currentYoloModelPath();
+    if (!p.isEmpty()) {
+        QSettings s(uiIniPathClusters(), QSettings::IniFormat);
+        s.setValue("ui/last_yolo_model_path", p);
+        s.sync();
+    }
+});
+
     connect(m_input, &QLineEdit::textChanged, this, [this](const QString& t) {
         const QString p = t.trimmed();
         if (p.isEmpty()) return;
@@ -191,81 +325,50 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         applyPreview(fi.absoluteFilePath());
         emit imageSelected(fi.absoluteFilePath());
     });
+
+
     connect(m_browseYolo, &QPushButton::clicked, this, [this] {
         QString yoloErr;
         if (!m_cfg.ensureYoloDirExists(m_appDir, &yoloErr)) {
-            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
+            QMessageBox::warning(this, "YOLO", yoloErr);
+            return;
+        }
+
+        const QString ydir = yoloDirAbs();
+
+        QSettings s(uiIniPathClusters(), QSettings::IniFormat);
+
+        QString startDir = s.value("ui/last_yolo_import_dir", ydir).toString().trimmed();
+        const QString current = currentYoloModelPath();
+        if (!current.isEmpty() && QFileInfo(current).exists()) {
+            startDir = QFileInfo(current).absolutePath();
+        }
+
+        const QString selected = QFileDialog::getOpenFileName(
+            this,
+            "Выберите модель YOLO",
+            startDir,
+            "YOLO weights (*.pt *.onnx)"
+        );
+        if (selected.isEmpty()) return;
+
+        s.setValue("ui/last_yolo_import_dir", QFileInfo(selected).absolutePath());
+
+        QString importErr;
+        const QString imported = importYoloModelToDir(selected, ydir, &importErr);
+        if (imported.isEmpty()) {
+            QMessageBox::warning(this, "YOLO", importErr.isEmpty() ? "Не удалось подключить модель YOLO." : importErr);
             return;
         }
 
         reloadYoloModels();
 
-        const QString ydir = yoloDirAbs();
-        const QStringList models = QDir(ydir).entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
-        if (models.isEmpty()) {
-            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
-            return;
-        }
-
-        const QString p = QFileDialog::getOpenFileName(
-            this,
-            "Выберите модель YOLO",
-            ydir,
-            "YOLO weights (*.pt *.onnx)"
-        );
-        if (p.isEmpty()) return;
-
-        if (!isPathInsideDirOrUnknown(p, ydir)) {
-            QMessageBox::warning(this, "YOLO", "Модель должна быть внутри папки yolo.");
-            return;
-        }
-
         if (m_yoloModel) {
             QSignalBlocker b(m_yoloModel);
-            m_yoloModel->setEditText(p);
+            selectYoloInCombo(m_yoloModel, imported);
         }
 
-        QSettings s(uiIniPathClusters(), QSettings::IniFormat);
-        s.setValue("ui/last_yolo_model_path", p);
-        s.sync();
-    });
-
-    connect(m_browseYolo, &QPushButton::clicked, this, [this] {
-        QString yoloErr;
-        if (!m_cfg.ensureYoloDirExists(m_appDir, &yoloErr)) {
-            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
-            return;
-        }
-
-        reloadYoloModels();
-
-        const QString ydir = yoloDirAbs();
-        const QStringList models = QDir(ydir).entryList(QStringList() << "*.pt" << "*.onnx", QDir::Files, QDir::Name);
-        if (models.isEmpty()) {
-            QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
-            return;
-        }
-
-        const QString p = QFileDialog::getOpenFileName(
-            this,
-            "Выберите модель YOLO",
-            ydir,
-            "YOLO weights (*.pt *.onnx)"
-        );
-        if (p.isEmpty()) return;
-
-        if (!isPathInsideDirOrUnknown(p, ydir)) {
-            QMessageBox::warning(this, "YOLO", "Модель должна быть внутри папки yolo.");
-            return;
-        }
-
-        if (m_yoloModel) {
-            QSignalBlocker b(m_yoloModel);
-            m_yoloModel->setEditText(p);
-        }
-
-        QSettings s(uiIniPathClusters(), QSettings::IniFormat);
-        s.setValue("ui/last_yolo_model_path", p);
+        s.setValue("ui/last_yolo_model_path", imported);
         s.sync();
     });
 
@@ -281,10 +384,13 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
 
             const QString out;
 
-            const QString yolo = currentYoloModelPath();
+            QString yolo = currentYoloModelPath();
             if (yolo.isEmpty() || !QFileInfo(yolo).exists()) {
-                QMessageBox::warning(this, "YOLO", "YOLO не установлен.");
-                return;
+                m_browseYolo->click();
+                yolo = currentYoloModelPath();
+                if (yolo.isEmpty() || !QFileInfo(yolo).exists()) {
+                    return;
+                }
             }
 
             const QString ydir = yoloDirAbs();
@@ -350,6 +456,11 @@ void ClustersTab::reloadYoloModels() {
 QString ClustersTab::currentYoloModelPath() const {
     if (!m_yoloModel) return {};
 
+    const QString dataPath = m_yoloModel->currentData().toString().trimmed();
+    if (!dataPath.isEmpty()) {
+        return QDir::cleanPath(QFileInfo(dataPath).absoluteFilePath());
+    }
+
     QString t = m_yoloModel->currentText().trimmed();
     if (t.isEmpty()) return {};
 
@@ -357,12 +468,14 @@ QString ClustersTab::currentYoloModelPath() const {
     QFileInfo fi(t);
 
     if (!fi.isAbsolute()) {
-        if (!ydir.isEmpty()) return QDir::cleanPath(QDir(ydir).filePath(t));
+        if (!ydir.isEmpty()) {
+            return QDir::cleanPath(QDir(ydir).filePath(t));
+        }
         return {};
     }
-    return fi.absoluteFilePath();
-}
 
+    return QDir::cleanPath(fi.absoluteFilePath());
+}
 
 static QString absPathLocal(const QString& appDir, const QString& relOrAbs) {
     QFileInfo fi(relOrAbs);
