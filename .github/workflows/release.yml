@@ -21,6 +21,7 @@ jobs:
     env:
       QT_VERSION: "6.10.2"
       QT_ARCH: "win64_mingw"
+      MINGW_DIR: "mingw1310_64"
       APP_TARGET: "traffic"
       BUILD_DIR: "build-release"
       DIST_ROOT: "dist"
@@ -45,13 +46,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Install Qt
+      - name: Install Qt + MinGW 13.1
         uses: jurplel/install-qt-action@v4
         with:
           version: 6.10.2
           arch: win64_mingw
           modules: qtlocation qtpositioning
+          tools: 'tools_mingw1310,qt.tools.win64_mingw1310'
+          setup-python: false
           cache: true
+
+      - name: Add MinGW to PATH
+        shell: cmd
+        run: |
+          echo %IQTA_TOOLS%\%MINGW_DIR%\bin>>%GITHUB_PATH%
+
+      - name: Check toolchain
+        shell: cmd
+        run: |
+          where gcc
+          where g++
+          gcc --version
+          g++ --version
 
       - name: Setup CMake 4.0.2 + Ninja
         uses: lukka/get-cmake@latest
@@ -62,7 +78,12 @@ jobs:
       - name: Configure (CMake Release)
         shell: cmd
         run: |
-          cmake -S . -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          set "MINGW_BIN=%IQTA_TOOLS%\%MINGW_DIR%\bin"
+          cmake -S . -B "%BUILD_DIR%" -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER="%MINGW_BIN%\gcc.exe" ^
+            -DCMAKE_CXX_COMPILER="%MINGW_BIN%\g++.exe" ^
+            -DCMAKE_RC_COMPILER="%MINGW_BIN%\windres.exe"
 
       - name: Build (Release)
         shell: cmd
@@ -86,14 +107,17 @@ jobs:
             exit /b 1
           )
 
-          copy /Y "%APP_EXE%" "%DIST_DIR%\\%APP_TARGET%.exe"
+          copy /Y "%APP_EXE%" "%DIST_DIR%\%APP_TARGET%.exe"
 
-          windeployqt --release --no-translations --compiler-runtime --qmldir "%GITHUB_WORKSPACE%" "%DIST_DIR%\\%APP_TARGET%.exe"
+          "%QT_ROOT_DIR%\bin\windeployqt.exe" --release --no-translations --compiler-runtime --qmldir "%GITHUB_WORKSPACE%" "%DIST_DIR%\%APP_TARGET%.exe"
+
           xcopy /E /I /Y "%pythonLocation%" "%DIST_DIR%\py"
           copy /Y "%DIST_DIR%\py\pythonw.exe" "%DIST_DIR%\py\traffic_py.exe"
-          if exist "python" xcopy /E /I /Y "python" "%DIST_DIR%\\python"
-          if exist "yolo"   xcopy /E /I /Y "yolo"   "%DIST_DIR%\\yolo"
-          if exist "config" xcopy /E /I /Y "config" "%DIST_DIR%\\config"
+
+          if exist "%BUILD_DIR%\python" xcopy /E /I /Y "%BUILD_DIR%\python" "%DIST_DIR%\python"
+          if exist "%BUILD_DIR%\config" xcopy /E /I /Y "%BUILD_DIR%\config" "%DIST_DIR%\config"
+          if exist "%BUILD_DIR%\assets" xcopy /E /I /Y "%BUILD_DIR%\assets" "%DIST_DIR%\assets"
+          if exist "yolo" xcopy /E /I /Y "yolo" "%DIST_DIR%\yolo"
 
       - name: Create zip
         shell: cmd

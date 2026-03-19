@@ -18,6 +18,7 @@ jobs:
     env:
       QT_VERSION: "6.10.2"
       QT_ARCH: "win64_mingw"
+      MINGW_DIR: "mingw1310_64"
       APP_TARGET: "traffic"
       BUILD_DIR: "build-${{ matrix.build_type }}"
       BUILD_TYPE: "${{ matrix.build_type }}"
@@ -40,13 +41,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Install Qt
+      - name: Install Qt + MinGW 13.1
         uses: jurplel/install-qt-action@v4
         with:
           version: 6.10.2
           arch: win64_mingw
           modules: qtlocation qtpositioning
+          tools: 'tools_mingw1310,qt.tools.win64_mingw1310'
+          setup-python: false
           cache: true
+
+      - name: Add MinGW to PATH
+        shell: cmd
+        run: |
+          echo %IQTA_TOOLS%\%MINGW_DIR%\bin>>%GITHUB_PATH%
+
+      - name: Check toolchain
+        shell: cmd
+        run: |
+          where gcc
+          where g++
+          gcc --version
+          g++ --version
 
       - name: Setup CMake 4.0.2 + Ninja
         uses: lukka/get-cmake@latest
@@ -57,7 +73,12 @@ jobs:
       - name: Configure (CMake)
         shell: cmd
         run: |
-          cmake -S . -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+          set "MINGW_BIN=%IQTA_TOOLS%\%MINGW_DIR%\bin"
+          cmake -S . -B "%BUILD_DIR%" -G Ninja ^
+            -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+            -DCMAKE_C_COMPILER="%MINGW_BIN%\gcc.exe" ^
+            -DCMAKE_CXX_COMPILER="%MINGW_BIN%\g++.exe" ^
+            -DCMAKE_RC_COMPILER="%MINGW_BIN%\windres.exe"
 
       - name: Build
         shell: cmd
@@ -94,9 +115,10 @@ jobs:
           xcopy /E /I /Y "%pythonLocation%" "dist\traffic\py"
           copy /Y "dist\traffic\py\pythonw.exe" "dist\traffic\py\traffic_py.exe"
 
-          if exist "python" xcopy /E /I /Y "python" "dist\traffic\python"
-          if exist "yolo"   xcopy /E /I /Y "yolo"   "dist\traffic\yolo"
-          if exist "config" xcopy /E /I /Y "config" "dist\traffic\config"
+          if exist "%BUILD_DIR%\python" xcopy /E /I /Y "%BUILD_DIR%\python" "dist\traffic\python"
+          if exist "%BUILD_DIR%\config" xcopy /E /I /Y "%BUILD_DIR%\config" "dist\traffic\config"
+          if exist "%BUILD_DIR%\assets" xcopy /E /I /Y "%BUILD_DIR%\assets" "dist\traffic\assets"
+          if exist "yolo" xcopy /E /I /Y "yolo" "dist\traffic\yolo"
 
       - name: Upload artifact (Release package)
         if: matrix.build_type == 'Release'

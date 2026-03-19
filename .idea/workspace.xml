@@ -32,34 +32,6 @@
   <component name="ChangeListManager">
     <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5.3 - Fix CI/CD">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/default_config.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/full_distance/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/full_distance/full_distance.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/claster_detect.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/objects_detect.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/rotation_detect.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/speed_detect.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/notebooks/vehicle_detect.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/api.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_1.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_3.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/prototypes/cluster_4.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/requirements.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/result_contract.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/runner.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/tools/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/python/tools/convert_image.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -290,6 +262,7 @@
       <workItem from="1773830275222" duration="5681000" />
       <workItem from="1773837549680" duration="2202000" />
       <workItem from="1773864424774" duration="4000" />
+      <workItem from="1773898756340" duration="3500000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
