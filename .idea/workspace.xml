@@ -30,7 +30,9 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="04.03 - v0.5.3 - Fix CI/CD">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="19.03 - v0.6.1 - Fix CI/CD">
+      <change beforePath="$PROJECT_DIR$/.github/workflows/ci.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/ci.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.github/workflows/release.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/release.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -262,7 +264,7 @@
       <workItem from="1773830275222" duration="5681000" />
       <workItem from="1773837549680" duration="2202000" />
       <workItem from="1773864424774" duration="4000" />
-      <workItem from="1773898756340" duration="3500000" />
+      <workItem from="1773898756340" duration="4080000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -512,7 +514,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772714439772</updated>
     </task>
-    <option name="localTasksCounter" value="32" />
+    <task id="LOCAL-00032" summary="19.03 - v0.6.1 - Fix CI/CD">
+      <option name="closed" value="true" />
+      <created>1773910454467</created>
+      <option name="number" value="00032" />
+      <option name="presentableId" value="LOCAL-00032" />
+      <option name="project" value="LOCAL" />
+      <updated>1773910454467</updated>
+    </task>
+    <option name="localTasksCounter" value="33" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -551,7 +561,8 @@
     <MESSAGE value="04.03 - v0.5.1 - Fix full_distance" />
     <MESSAGE value="04.03 - v0.5.2 - Fix CI/CD" />
     <MESSAGE value="04.03 - v0.5.3 - Fix CI/CD" />
-    <option name="LAST_COMMIT_MESSAGE" value="04.03 - v0.5.3 - Fix CI/CD" />
+    <MESSAGE value="19.03 - v0.6.1 - Fix CI/CD" />
+    <option name="LAST_COMMIT_MESSAGE" value="19.03 - v0.6.1 - Fix CI/CD" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -73,12 +73,15 @@ jobs:
       - name: Configure (CMake)
         shell: cmd
         run: |
+          if exist "%BUILD_DIR%" rmdir /S /Q "%BUILD_DIR%"
           set "MINGW_BIN=%IQTA_TOOLS%\%MINGW_DIR%\bin"
+          set "MINGW_BIN_CMAKE=%MINGW_BIN:\=/%"
           cmake -S . -B "%BUILD_DIR%" -G Ninja ^
             -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-            -DCMAKE_C_COMPILER="%MINGW_BIN%\gcc.exe" ^
-            -DCMAKE_CXX_COMPILER="%MINGW_BIN%\g++.exe" ^
-            -DCMAKE_RC_COMPILER="%MINGW_BIN%\windres.exe"
+            -DCMAKE_C_COMPILER="%MINGW_BIN_CMAKE%/gcc.exe" ^
+            -DCMAKE_CXX_COMPILER="%MINGW_BIN_CMAKE%/g++.exe" ^
+            -DCMAKE_RC_COMPILER="%MINGW_BIN_CMAKE%/windres.exe"
+          
 
       - name: Build
         shell: cmd
