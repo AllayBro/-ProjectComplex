@@ -4,7 +4,6 @@
 #include <QHBoxLayout>
 #include <QSplitter>
 #include <QLabel>
-#include <QTextEdit>
 #include <QFileInfo>
 #include <QFile>
 #include <QDir>
@@ -30,8 +29,6 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QPushButton>
-#include <QComboBox>
-#include <QDoubleSpinBox>
 #include <QSignalBlocker>
 #include <QtGlobal>
 #include <QtMath>
@@ -76,11 +73,7 @@ Item {
     property double refinedLat: 0.0
     property double refinedLon: 0.0
 
-    property bool hasVehiclePoint: false
-    property double vehicleLat: 0.0
-    property double vehicleLon: 0.0
-    property string vehicleLabel: ""
-
+    property var vehiclesModel: []
     signal markerClicked(string imagePath)
     signal mapClicked(double lat, double lon)
 
@@ -190,6 +183,64 @@ Item {
     }
 
     Component {
+        id: activeCameraMarkerComponent
+        Item {
+            width: 32
+            height: 32
+
+            Item {
+                anchors.centerIn: parent
+                width: 32
+                height: 32
+                rotation: root.hasSelectedDirection ? root.selectedAzimuthDeg : 0.0
+                transformOrigin: Item.Center
+
+                Rectangle {
+                    x: 12
+                    y: 10
+                    width: 8
+                    height: 14
+                    radius: 4
+                    color: "#1976d2"
+                    border.color: "white"
+                    border.width: 2
+                }
+
+                Rectangle {
+                    x: 14
+                    y: 2
+                    width: 4
+                    height: 12
+                    radius: 2
+                    color: "#1976d2"
+                    border.color: "white"
+                    border.width: 1
+                }
+
+                Rectangle {
+                    x: 11
+                    y: 4
+                    width: 4
+                    height: 9
+                    radius: 2
+                    rotation: -40
+                    color: "#1976d2"
+                }
+
+                Rectangle {
+                    x: 17
+                    y: 4
+                    width: 4
+                    height: 9
+                    radius: 2
+                    rotation: 40
+                    color: "#1976d2"
+                }
+            }
+        }
+    }
+
+    Component {
         id: vehicleMarkerComponent
         Item {
             Column {
@@ -225,6 +276,31 @@ Item {
         }
     }
 
+    Component {
+        id: vehicleDelegate
+        MapQuickItem {
+            coordinate: QtPositioning.coordinate(modelData.lat, modelData.lon)
+            anchorPoint.x: 9
+            anchorPoint.y: 9
+
+            sourceItem: Item {
+                width: 18
+                height: 18
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 14
+                    height: 14
+                    radius: 7
+                    color: "#8e24aa"
+                    border.color: "white"
+                    border.width: 2
+                }
+            }
+        }
+    }
+
+
     Map {
         id: mapOnline
         anchors.fill: parent
@@ -235,7 +311,6 @@ Item {
         property var startCentroid
 
         MapItemView { model: root.pointsModel; delegate: markerDelegate }
-
         MapCircle {
             visible: root.hasSelectedPoint && root.uncertaintyM > 0
             center: QtPositioning.coordinate(root.selectedLat, root.selectedLon)
@@ -248,34 +323,28 @@ Item {
         MapQuickItem {
             visible: root.hasExifPoint
             coordinate: QtPositioning.coordinate(root.exifLat, root.exifLon)
-            anchorPoint.x: 10
-            anchorPoint.y: 10
-            sourceItem: Rectangle { width: 20; height: 20; radius: 10; color: "#e53935"; border.color: "white"; border.width: 2 }
+            anchorPoint.x: 6
+            anchorPoint.y: 6
+            sourceItem: Rectangle {
+                width: 12
+                height: 12
+                radius: 6
+                color: "#e53935"
+                opacity: 0.35
+                border.color: "white"
+                border.width: 1
+            }
         }
 
         MapQuickItem {
-            visible: root.hasManualPoint
-            coordinate: QtPositioning.coordinate(root.manualLat, root.manualLon)
-            anchorPoint.x: 10
-            anchorPoint.y: 10
-            sourceItem: Rectangle { width: 20; height: 20; radius: 10; color: "#1976d2"; border.color: "white"; border.width: 2 }
+            visible: root.hasSelectedPoint
+            coordinate: QtPositioning.coordinate(root.selectedLat, root.selectedLon)
+            anchorPoint.x: 16
+            anchorPoint.y: 16
+            sourceItem: activeCameraMarkerComponent
         }
 
-        MapQuickItem {
-            visible: root.hasRefinedPoint
-            coordinate: QtPositioning.coordinate(root.refinedLat, root.refinedLon)
-            anchorPoint.x: 12
-            anchorPoint.y: 12
-            sourceItem: Rectangle { width: 24; height: 24; radius: 12; color: "#43a047"; border.color: "white"; border.width: 3 }
-        }
-
-        MapQuickItem {
-            visible: root.hasVehiclePoint
-            coordinate: QtPositioning.coordinate(root.vehicleLat, root.vehicleLon)
-            anchorPoint.x: 9
-            anchorPoint.y: 24
-            sourceItem: vehicleMarkerComponent
-        }
+        MapItemView { model: root.vehiclesModel; delegate: vehicleDelegate }
 
         MapPolyline {
             id: cameraLineOnline
@@ -326,7 +395,6 @@ Item {
         property var startCentroid
 
         MapItemView { model: root.pointsModel; delegate: markerDelegate }
-
         MapCircle {
             visible: root.hasSelectedPoint && root.uncertaintyM > 0
             center: QtPositioning.coordinate(root.selectedLat, root.selectedLon)
@@ -339,34 +407,28 @@ Item {
         MapQuickItem {
             visible: root.hasExifPoint
             coordinate: QtPositioning.coordinate(root.exifLat, root.exifLon)
-            anchorPoint.x: 10
-            anchorPoint.y: 10
-            sourceItem: Rectangle { width: 20; height: 20; radius: 10; color: "#e53935"; border.color: "white"; border.width: 2 }
+            anchorPoint.x: 6
+            anchorPoint.y: 6
+            sourceItem: Rectangle {
+                width: 12
+                height: 12
+                radius: 6
+                color: "#e53935"
+                opacity: 0.35
+                border.color: "white"
+                border.width: 1
+            }
         }
 
         MapQuickItem {
-            visible: root.hasManualPoint
-            coordinate: QtPositioning.coordinate(root.manualLat, root.manualLon)
-            anchorPoint.x: 10
-            anchorPoint.y: 10
-            sourceItem: Rectangle { width: 20; height: 20; radius: 10; color: "#1976d2"; border.color: "white"; border.width: 2 }
+            visible: root.hasSelectedPoint
+            coordinate: QtPositioning.coordinate(root.selectedLat, root.selectedLon)
+            anchorPoint.x: 16
+            anchorPoint.y: 16
+            sourceItem: activeCameraMarkerComponent
         }
 
-        MapQuickItem {
-            visible: root.hasRefinedPoint
-            coordinate: QtPositioning.coordinate(root.refinedLat, root.refinedLon)
-            anchorPoint.x: 12
-            anchorPoint.y: 12
-            sourceItem: Rectangle { width: 24; height: 24; radius: 12; color: "#43a047"; border.color: "white"; border.width: 3 }
-        }
-
-        MapQuickItem {
-            visible: root.hasVehiclePoint
-            coordinate: QtPositioning.coordinate(root.vehicleLat, root.vehicleLon)
-            anchorPoint.x: 9
-            anchorPoint.y: 24
-            sourceItem: vehicleMarkerComponent
-        }
+        MapItemView { model: root.vehiclesModel; delegate: vehicleDelegate }
 
         MapPolyline {
             id: cameraLineOffline
@@ -525,38 +587,11 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
     geoRow1->addWidget(m_btnSaveGeoRef);
     rlay->addLayout(geoRow1);
 
-    auto* geoRow2 = new QHBoxLayout();
-    geoRow2->addWidget(new QLabel("Источник:"));
-    m_locationSource = new QComboBox(this);
-    m_locationSource->addItem("EXIF", "exif");
-    m_locationSource->addItem("Ручная", "manual");
-    m_locationSource->addItem("Оценочная", "estimated");
-    geoRow2->addWidget(m_locationSource, 1);
-    geoRow2->addWidget(new QLabel("Радиус, м:"));
-    m_uncertainty = new QDoubleSpinBox(this);
-    m_uncertainty->setRange(0.0, 5000.0);
-    m_uncertainty->setDecimals(1);
-    m_uncertainty->setSingleStep(5.0);
-    m_uncertainty->setValue(15.0);
-    geoRow2->addWidget(m_uncertainty);
-    rlay->addLayout(geoRow2);
-
     m_geoStatus = new QLabel(this);
     m_geoStatus->setWordWrap(true);
+    m_geoStatus->setMinimumWidth(260);
     rlay->addWidget(m_geoStatus);
-
-    m_preview = new QLabel();
-    m_preview->setMinimumHeight(220);
-    m_preview->setAlignment(Qt::AlignCenter);
-    m_preview->setFrameShape(QFrame::Box);
-
-    m_info = new QTextEdit();
-    m_info->setReadOnly(true);
-    m_info->setLineWrapMode(QTextEdit::NoWrap);
-
-    rlay->addWidget(m_preview, 1);
-    rlay->addWidget(m_info, 2);
-
+    rlay->addStretch(1);
     split->addWidget(m_quick);
     split->addWidget(right);
     split->setStretchFactor(0, 3);
@@ -568,8 +603,6 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
     connect(m_btnSetDirection, &QPushButton::clicked, this, &MapTab::onSetDirectionMode);
     connect(m_btnClearGeoRef, &QPushButton::clicked, this, &MapTab::onClearGeoRef);
     connect(m_btnSaveGeoRef, &QPushButton::clicked, this, &MapTab::onSaveGeoRef);
-    connect(m_locationSource, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int){ onLocationSourceChanged(); });
-    connect(m_uncertainty, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MapTab::onUncertaintyChanged);
 
     initQml();
     updateGeoControlsFromSelection();
@@ -619,7 +652,7 @@ void MapTab::initQml()
         QStringList errs;
         for (const auto& e : m_quick->errors()) errs << e.toString();
         m_netStatus->setText("QML Error");
-        m_info->setPlainText(errs.join("\n"));
+        updateGeoStatus("QML Error: " + errs.join(" | "));
         return;
     }
 
@@ -645,7 +678,7 @@ void MapTab::initQml()
             else if (s == QQuickWidget::Error) {
                 QStringList errs;
                 for (const auto& e : m_quick->errors()) errs << e.toString();
-                m_info->setPlainText("Async QML Error:\n" + errs.join("\n"));
+                updateGeoStatus("Async QML Error: " + errs.join(" | "));
             }
         });
     }
@@ -735,6 +768,13 @@ bool MapTab::itemDisplayCoords(const Item& it, double& lat, double& lon, QString
         return true;
     }
 
+    if (it.hasCoarseGeo) {
+        lat = it.coarseLat;
+        lon = it.coarseLon;
+        if (source) *source = QStringLiteral("coarse");
+        return true;
+    }
+
     if (it.hasGps) {
         lat = it.lat;
         lon = it.lon;
@@ -755,6 +795,54 @@ QString MapTab::defaultLocationSource(const Item& it)
     if (it.hasCameraPoint) return QStringLiteral("manual");
     if (it.hasGps) return QStringLiteral("exif");
     return QStringLiteral("estimated");
+}
+
+bool MapTab::isLocalExifRefine(const Item& it)
+{
+    if (!it.hasRefinedCamera)
+        return false;
+
+    const QString seed = it.refinedSeedSource.trimmed().toLower();
+    const QString method = it.refinedMethod.trimmed().toLower();
+
+    return seed == QStringLiteral("exif")
+           && method.contains(QStringLiteral("seed_window"));
+}
+
+QString MapTab::autoSidecarLocationSource(const Item& it)
+{
+    if (it.hasCameraPoint)
+        return QStringLiteral("manual");
+
+    if (it.hasGps)
+        return QStringLiteral("exif");
+
+    return QStringLiteral("estimated");
+}
+
+double MapTab::autoSidecarUncertaintyM(const Item& it)
+{
+    if (it.hasRefinedCamera && it.refinedUncertaintyM > 0.0)
+        return it.refinedUncertaintyM;
+
+    if (it.uncertaintyM > 0.0)
+        return it.uncertaintyM;
+
+    return 15.0;
+}
+
+bool MapTab::isManualReviewRecommended(const Item& it)
+{
+    if (it.refinedNeedsManualReview || it.vehicleNeedsManualReview)
+        return true;
+
+    if (it.hasRefinedCamera && !it.hasRefinedAzimuth && !it.hasCameraAzimuth)
+        return true;
+
+    if (!it.hasRefinedCamera && it.hasGps && !it.hasCameraPoint)
+        return true;
+
+    return false;
 }
 
 QString MapTab::geoRefSidecarPath(const QString& imagePath)
@@ -842,6 +930,9 @@ bool MapTab::saveGeoRef(const Item& it, QString* err)
         return true;
     }
 
+    const QString autoSource = autoSidecarLocationSource(it);
+    const double autoUncertainty = autoSidecarUncertaintyM(it);
+
     QJsonObject o;
     o.insert(QStringLiteral("image_path"), it.imagePath);
     if (it.hasCameraPoint) {
@@ -851,8 +942,8 @@ bool MapTab::saveGeoRef(const Item& it, QString* err)
     if (it.hasCameraAzimuth) {
         o.insert(QStringLiteral("camera_azimuth_deg"), it.cameraAzimuthDeg);
     }
-    o.insert(QStringLiteral("location_source"), defaultLocationSource(it));
-    o.insert(QStringLiteral("uncertainty_m"), it.uncertaintyM);
+    o.insert(QStringLiteral("location_source"), autoSource);
+    o.insert(QStringLiteral("uncertainty_m"), autoUncertainty);
     if (it.hasGps) {
         o.insert(QStringLiteral("exif_lat"), it.lat);
         o.insert(QStringLiteral("exif_lon"), it.lon);
@@ -887,6 +978,7 @@ double MapTab::azimuthDegrees(double lat1, double lon1, double lat2, double lon2
                      std::sin(phi1) * std::cos(phi2) * std::cos(dLon);
     return normalizeAzimuth(qRadiansToDegrees(std::atan2(y, x)));
 }
+
 void MapTab::syncSelectedToQml()
 {
     QQuickItem* ro = m_quick->rootObject();
@@ -899,8 +991,7 @@ void MapTab::syncSelectedToQml()
     ro->setProperty("hasExifPoint", false);
     ro->setProperty("hasManualPoint", false);
     ro->setProperty("hasRefinedPoint", false);
-    ro->setProperty("hasVehiclePoint", false);
-    ro->setProperty("vehicleLabel", QString());
+    ro->setProperty("vehiclesModel", QVariantList{});
 
     if (m_selected.isEmpty() || !m_items.contains(m_selected)) return;
 
@@ -924,18 +1015,14 @@ void MapTab::syncSelectedToQml()
         ro->setProperty("refinedLon", it.refinedLon);
     }
 
-    if (it.hasVehicleGeo) {
-        ro->setProperty("hasVehiclePoint", true);
-        ro->setProperty("vehicleLat", it.vehicleLat);
-        ro->setProperty("vehicleLon", it.vehicleLon);
-
-        QStringList label;
-        if (it.vehicleDistanceM > 0.0)
-            label << QString("dist=%1 m").arg(it.vehicleDistanceM, 0, 'f', 1);
-        label << QString("conf=%1").arg(it.vehicleConfidence, 0, 'f', 2);
-        label << (it.vehicleNeedsManualReview ? "manual=true" : "manual=false");
-        ro->setProperty("vehicleLabel", label.join(" | "));
+    QVariantList vehicles = it.vehiclePoints;
+    if (vehicles.isEmpty() && it.hasVehicleGeo) {
+        QVariantMap v;
+        v.insert("lat", it.vehicleLat);
+        v.insert("lon", it.vehicleLon);
+        vehicles.push_back(v);
     }
+    ro->setProperty("vehiclesModel", vehicles);
 
     double lat = 0.0;
     double lon = 0.0;
@@ -964,18 +1051,64 @@ void MapTab::updateGeoStatus(const QString& text)
     switch (m_editMode) {
     case EditMode::SetCameraPoint:
         m_geoStatus->setText("Режим: щёлкните по карте, чтобы задать положение камеры.");
-        break;
+        return;
     case EditMode::SetCameraDirection:
         m_geoStatus->setText("Режим: щёлкните по карте второй точкой, чтобы задать азимут камеры.");
-        break;
+        return;
     case EditMode::Idle:
     default:
-        if (m_selected.isEmpty())
-            m_geoStatus->setText("Снимок не выбран.");
-        else
-            m_geoStatus->setText("Геопривязка доступна для выбранного снимка.");
         break;
     }
+
+    if (m_selected.isEmpty() || !m_items.contains(m_selected)) {
+        m_geoStatus->setText("Снимок не выбран.");
+        return;
+    }
+
+    const Item& it = m_items[m_selected];
+    const bool hasDirection = it.hasRefinedAzimuth || it.hasCameraAzimuth;
+    const bool recommendReview = isManualReviewRecommended(it);
+
+    if (it.hasRefinedCamera) {
+        if (isLocalExifRefine(it)) {
+            if (hasDirection) {
+                m_geoStatus->setText(
+                    recommendReview
+                        ? "Локальное уточнение выполнено рядом с EXIF-подсказкой. Рекомендуется ручная проверка."
+                        : "Локальное уточнение выполнено рядом с EXIF-подсказкой."
+                );
+            } else {
+                m_geoStatus->setText("Локальное уточнение выполнено рядом с EXIF-подсказкой, но направление не подтверждено. Рекомендуется ручная проверка.");
+            }
+        } else {
+            if (hasDirection) {
+                m_geoStatus->setText(
+                    recommendReview
+                        ? "Точка и направление найдены автоматически. Рекомендуется ручная проверка."
+                        : "Точка и направление определены автоматически."
+                );
+            } else {
+                m_geoStatus->setText("Точка камеры найдена автоматически, но направление не подтверждено. Рекомендуется ручная проверка.");
+            }
+        }
+        return;
+    }
+
+    if (it.hasCameraPoint) {
+        if (hasDirection) {
+            m_geoStatus->setText("Точка и направление камеры заданы вручную.");
+        } else {
+            m_geoStatus->setText("Точка камеры задана вручную. Направление можно уточнить кнопкой «Направление».");
+        }
+        return;
+    }
+
+    if (it.hasGps) {
+        m_geoStatus->setText("Используются EXIF-координаты как подсказка. Точное положение ещё не подтверждено.");
+        return;
+    }
+
+    m_geoStatus->setText("Точка камеры не определена.");
 }
 
 void MapTab::updateGeoControlsFromSelection()
@@ -994,21 +1127,6 @@ void MapTab::updateGeoControlsFromSelection()
         canSetDirection = itemDisplayCoords(it, lat, lon, nullptr);
     }
     m_btnSetDirection->setEnabled(canSetDirection);
-
-    m_updatingControls = true;
-    if (hasSelection) {
-        const Item& it = m_items[m_selected];
-        const QString src = defaultLocationSource(it);
-        const int idx = m_locationSource->findData(src);
-        m_locationSource->setCurrentIndex(idx >= 0 ? idx : 0);
-        m_uncertainty->setValue(it.uncertaintyM > 0.0 ? it.uncertaintyM : 15.0);
-    } else {
-        m_locationSource->setCurrentIndex(0);
-        m_uncertainty->setValue(15.0);
-    }
-    m_locationSource->setEnabled(hasSelection);
-    m_uncertainty->setEnabled(hasSelection);
-    m_updatingControls = false;
 
     updateGeoStatus();
 }
@@ -1055,21 +1173,11 @@ void MapTab::selectItem(const QString& imagePath)
     double mapLon = 0.0;
     bool hasPoint = false;
 
-    if (v.hasVehicleGeo) {
+    if (itemDisplayCoords(v, mapLat, mapLon, nullptr)) {
+        hasPoint = true;
+    } else if (v.hasVehicleGeo) {
         mapLat = v.vehicleLat;
         mapLon = v.vehicleLon;
-        hasPoint = true;
-    } else if (v.hasRefinedCamera) {
-        mapLat = v.refinedLat;
-        mapLon = v.refinedLon;
-        hasPoint = true;
-    } else if (v.hasCameraPoint) {
-        mapLat = v.cameraLat;
-        mapLon = v.cameraLon;
-        hasPoint = true;
-    } else if (v.hasGps) {
-        mapLat = v.lat;
-        mapLon = v.lon;
         hasPoint = true;
     }
 
@@ -1126,6 +1234,67 @@ void MapTab::applyRunnerExif(const QJsonObject& exifObj, Item& out)
     setIf("Model", out.model);
     setIf("DateTime", out.dateTime);
     setIf("DateTimeOriginal", out.dateTimeOriginal);
+}
+
+void MapTab::applyCoarseGeoSearch(const QJsonObject& artifactsObj, Item& out)
+{
+    out.hasCoarseGeo = false;
+    out.coarseLat = 0.0;
+    out.coarseLon = 0.0;
+    out.coarseRadiusM = 0.0;
+    out.coarseConfidence = 0.0;
+    out.coarseMethod.clear();
+    out.coarseSeedSource.clear();
+    out.coarseGeoJsonPath.clear();
+
+    if (artifactsObj.isEmpty())
+        return;
+
+    out.coarseGeoJsonPath = artifactsObj.value("coarse_geo_json_path").toString().trimmed();
+
+    const QJsonObject coarse = artifactsObj.value("coarse_geo_search").toObject();
+    if (coarse.isEmpty())
+        return;
+
+    auto readDouble = [](const QJsonObject& o, const char* key, double& dst, bool& ok) {
+        ok = false;
+        const QJsonValue v = o.value(QString::fromLatin1(key));
+        if (v.isDouble()) {
+            dst = v.toDouble();
+            ok = qIsFinite(dst);
+        } else if (v.isString()) {
+            dst = v.toString().toDouble(&ok);
+        }
+    };
+
+    bool okLat = false;
+    bool okLon = false;
+    double lat = 0.0;
+    double lon = 0.0;
+
+    readDouble(coarse, "best_lat", lat, okLat);
+    readDouble(coarse, "best_lon", lon, okLon);
+
+    if (okLat && okLon && lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0) {
+        out.hasCoarseGeo = true;
+        out.coarseLat = lat;
+        out.coarseLon = lon;
+    }
+
+    bool okRadius = false;
+    double radius = 0.0;
+    readDouble(coarse, "search_radius_m", radius, okRadius);
+    if (okRadius && radius >= 0.0)
+        out.coarseRadiusM = radius;
+
+    bool okConf = false;
+    double conf = 0.0;
+    readDouble(coarse, "confidence", conf, okConf);
+    if (okConf)
+        out.coarseConfidence = conf;
+
+    out.coarseMethod = coarse.value("method").toString().trimmed();
+    out.coarseSeedSource = coarse.value("seed_source").toString().trimmed();
 }
 
 void MapTab::applyCameraRefine(const QJsonObject& artifactsObj, Item& out)
@@ -1192,10 +1361,12 @@ void MapTab::applyCameraRefine(const QJsonObject& artifactsObj, Item& out)
     if (okConf) out.refinedConfidence = conf;
 
     out.refinedNeedsManualReview = refine.value("needs_manual_review").toBool(false);
-    out.refinedMethod = refine.value("method").toString().trimmed();
+    out.refinedMethod = refine.value("refine_method").toString().trimmed();
+    if (out.refinedMethod.isEmpty())
+        out.refinedMethod = refine.value("method").toString().trimmed();
+
     out.refinedSeedSource = refine.value("seed_source").toString().trimmed();
 }
-
 void MapTab::applyVehicleGeo(const QJsonObject& artifactsObj, Item& out)
 {
     out.hasVehicleGeo = false;
@@ -1207,6 +1378,7 @@ void MapTab::applyVehicleGeo(const QJsonObject& artifactsObj, Item& out)
     out.vehicleNeedsManualReview = false;
     out.vehicleGeoStatus.clear();
     out.vehicleGeoJsonPath.clear();
+    out.vehiclePoints.clear();
 
     if (artifactsObj.isEmpty()) return;
 
@@ -1257,127 +1429,44 @@ void MapTab::applyVehicleGeo(const QJsonObject& artifactsObj, Item& out)
     if (okConf) out.vehicleConfidence = conf;
 
     out.vehicleNeedsManualReview = geo.value("needs_manual_review").toBool(false);
+
+    const QJsonArray vehicles = geo.value("vehicles").toArray();
+    for (int i = 0; i < vehicles.size(); ++i) {
+        const QJsonObject v = vehicles.at(i).toObject();
+        if (v.isEmpty()) continue;
+
+        bool okVLat = false;
+        bool okVLon = false;
+        double vLat = 0.0;
+        double vLon = 0.0;
+        readDouble(v, "vehicle_lat", vLat, okVLat);
+        readDouble(v, "vehicle_lon", vLon, okVLon);
+
+        if (!(okVLat && okVLon && vLat >= -90.0 && vLat <= 90.0 && vLon >= -180.0 && vLon <= 180.0))
+            continue;
+
+        QVariantMap point;
+        point.insert("lat", vLat);
+        point.insert("lon", vLon);
+        out.vehiclePoints.push_back(point);
+    }
+
+    if (out.vehiclePoints.isEmpty() && out.hasVehicleGeo) {
+        QVariantMap point;
+        point.insert("lat", out.vehicleLat);
+        point.insert("lon", out.vehicleLon);
+        out.vehiclePoints.push_back(point);
+    }
+
     if (!out.hasVehicleGeo) {
         out.vehicleLat = 0.0;
         out.vehicleLon = 0.0;
     }
 }
+
 void MapTab::updateInfoPanel(const Item& it)
 {
-    QPixmap pm(it.imagePath);
-    if (!pm.isNull()) {
-        m_preview->setPixmap(pm.scaled(m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else {
-        m_preview->clear();
-    }
-
-    QStringList s;
-    s << ("file=" + it.imagePath);
-    s << ("georef_file=" + (it.geoRefPath.isEmpty() ? geoRefSidecarPath(it.imagePath) : it.geoRefPath));
-
-    if (it.hasGps) {
-        s << QString("exif_gps=%1, %2").arg(it.lat, 0, 'f', 8).arg(it.lon, 0, 'f', 8);
-    } else {
-        s << "exif_gps=нет координат";
-    }
-
-    if (it.hasCameraPoint) {
-        s << QString("manual_camera=%1, %2").arg(it.cameraLat, 0, 'f', 8).arg(it.cameraLon, 0, 'f', 8);
-    } else {
-        s << "manual_camera=нет";
-    }
-
-    QString source;
-    double displayLat = 0.0;
-    double displayLon = 0.0;
-    if (itemDisplayCoords(it, displayLat, displayLon, &source)) {
-        s << QString("effective_point=%1, %2").arg(displayLat, 0, 'f', 8).arg(displayLon, 0, 'f', 8);
-        s << ("effective_source=" + source);
-    } else {
-        s << "effective_point=нет";
-    }
-
-    if (it.hasCameraAzimuth) {
-        s << QString("manual_azimuth_deg=%1").arg(it.cameraAzimuthDeg, 0, 'f', 3);
-    } else {
-        s << "manual_azimuth_deg=нет";
-    }
-
-    s << QString("manual_uncertainty_m=%1").arg(it.uncertaintyM, 0, 'f', 3);
-
-    if (it.hasRefinedCamera) {
-        s << QString("camera_refined=%1, %2").arg(it.refinedLat, 0, 'f', 8).arg(it.refinedLon, 0, 'f', 8);
-    } else {
-        s << "camera_refined=нет";
-    }
-
-    if (it.hasRefinedAzimuth) {
-        s << QString("camera_refined_azimuth_deg=%1").arg(it.refinedAzimuthDeg, 0, 'f', 3);
-    } else {
-        s << "camera_refined_azimuth_deg=нет";
-    }
-
-    s << QString("camera_uncertainty_m=%1").arg(it.refinedUncertaintyM, 0, 'f', 3);
-    s << QString("camera_confidence=%1").arg(it.refinedConfidence, 0, 'f', 6);
-    s << QString("camera_needs_manual_review=%1").arg(it.refinedNeedsManualReview ? "true" : "false");
-
-    if (!it.refinedMethod.isEmpty()) s << ("camera_refine_method=" + it.refinedMethod);
-    if (!it.refinedSeedSource.isEmpty()) s << ("camera_refine_seed=" + it.refinedSeedSource);
-    if (!it.cameraRefineJsonPath.isEmpty()) s << ("camera_refine_json=" + it.cameraRefineJsonPath);
-
-    if (it.hasVehicleGeo) {
-        s << QString("vehicle_geo=%1, %2").arg(it.vehicleLat, 0, 'f', 8).arg(it.vehicleLon, 0, 'f', 8);
-    } else {
-        s << "vehicle_geo=нет";
-    }
-
-    s << QString("vehicle_distance_m=%1").arg(it.vehicleDistanceM, 0, 'f', 3);
-    s << QString("vehicle_bearing_deg=%1").arg(it.vehicleBearingDeg, 0, 'f', 3);
-    s << QString("vehicle_confidence=%1").arg(it.vehicleConfidence, 0, 'f', 6);
-    s << QString("vehicle_needs_manual_review=%1").arg(it.vehicleNeedsManualReview ? "true" : "false");
-
-    if (!it.vehicleGeoStatus.isEmpty()) s << ("vehicle_status=" + it.vehicleGeoStatus);
-    if (!it.vehicleGeoJsonPath.isEmpty()) s << ("vehicle_geo_json=" + it.vehicleGeoJsonPath);
-
-    if (!it.make.isEmpty()) s << ("make=" + it.make);
-    if (!it.model.isEmpty()) s << ("model=" + it.model);
-    if (!it.dateTime.isEmpty()) s << ("datetime=" + it.dateTime);
-    if (!it.dateTimeOriginal.isEmpty()) s << ("datetime_original=" + it.dateTimeOriginal);
-
-    if (!it.exif.isEmpty()) {
-        const QJsonObject data = it.exif.value("data").toObject();
-
-        auto addNum = [&](const char* key, const char* outKey) {
-            const QJsonValue v = data.value(QString::fromLatin1(key));
-            if (v.isDouble()) {
-                s << (QString::fromLatin1(outKey) + "=" + QString::number(v.toDouble(), 'f', 6));
-            } else if (v.isString()) {
-                const QString t = v.toString().trimmed();
-                if (!t.isEmpty()) s << (QString::fromLatin1(outKey) + "=" + t);
-            }
-        };
-
-        addNum("FNumber", "fnumber");
-        addNum("ExposureTime", "exposure");
-        addNum("FocalLength", "focal");
-        addNum("ISOSpeedRatings", "iso");
-    }
-
-    if (it.hasResult) {
-        s << "---- result ----";
-        s << ("module_id=" + it.result.moduleId);
-        s << ("device=" + it.result.deviceUsed);
-        s << ("detections=" + QString::number(it.result.detections.size()));
-
-        const QJsonValue distVal = it.result.artifacts.value(QStringLiteral("dist_m"));
-        if (distVal.isDouble()) {
-            s << QString("dist_m=%1").arg(distVal.toDouble(), 0, 'f', 3);
-        } else if (distVal.isString()) {
-            s << ("dist_m=" + distVal.toString());
-        }
-    }
-
-    m_info->setPlainText(s.join("\n"));
+    Q_UNUSED(it);
 }
 
 void MapTab::onMarkerClicked(const QString& imagePath)
@@ -1500,36 +1589,6 @@ void MapTab::onSaveGeoRef()
     updateGeoStatus(QStringLiteral("Геопривязка сохранена: ") + it->geoRefPath);
 }
 
-void MapTab::onLocationSourceChanged()
-{
-    if (m_updatingControls || m_selected.isEmpty()) return;
-
-    auto it = m_items.find(m_selected);
-    if (it == m_items.end()) return;
-
-    const QString source = m_locationSource->currentData().toString().trimmed();
-    if (source.isEmpty()) return;
-
-    it->locationSource = source;
-    updateInfoPanel(*it);
-    pushModelToQml();
-    syncSelectedToQml();
-    updateGeoStatus("Источник геопривязки изменён. Сохраните sidecar-файл.");
-}
-
-void MapTab::onUncertaintyChanged(double value)
-{
-    if (m_updatingControls || m_selected.isEmpty()) return;
-
-    auto it = m_items.find(m_selected);
-    if (it == m_items.end()) return;
-
-    it->uncertaintyM = value;
-    updateInfoPanel(*it);
-    syncSelectedToQml();
-    updateGeoStatus("Радиус неопределённости изменён. Сохраните sidecar-файл.");
-}
-
 void MapTab::onImageSelected(const QString& imagePath)
 {
     const QString p = imagePath.trimmed();
@@ -1595,13 +1654,17 @@ void MapTab::onResultReady(const QString& imagePath, const ModuleResult& r)
             it->locationSource = defaultLocationSource(*it);
     }
 
+    applyCoarseGeoSearch(r.artifacts, *it);
     applyCameraRefine(r.artifacts, *it);
     applyVehicleGeo(r.artifacts, *it);
     pushModelToQml();
     syncSelectedToQml();
 
-    if (m_selected == ap)
+    if (m_selected == ap) {
         updateInfoPanel(*it);
+        updateGeoControlsFromSelection();
+        updateGeoStatus();
+    }
 }
 
 // Мини-EXIF GPS (JPEG APP1 Exif)

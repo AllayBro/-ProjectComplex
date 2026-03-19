@@ -123,10 +123,83 @@ def _read_exif_seed(image_path: str) -> Dict[str, Any]:
     return out
 
 
-def _search_radius_m(exif_seed: Dict[str, Any], cfg: Dict[str, Any]) -> float:
+def _read_coarse_seed(artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(artifacts, dict):
+        return {}
+
+    coarse = artifacts.get("coarse_geo_search") or {}
+    if not isinstance(coarse, dict):
+        return {}
+
+    status = str(coarse.get("status", "")).strip().lower()
+    lat = _safe_float(coarse.get("best_lat"))
+    lon = _safe_float(coarse.get("best_lon"))
+
+    if status != "ready":
+        return {}
+
+    if lat is None or lon is None:
+        return {}
+
+    if not (-90.0 <= float(lat) <= 90.0 and -180.0 <= float(lon) <= 180.0):
+        return {}
+
+    out: Dict[str, Any] = {
+        "lat": float(lat),
+        "lon": float(lon),
+    }
+
+    radius = _safe_float(coarse.get("search_radius_m"))
+    if radius is not None and radius > 0.0:
+        out["search_radius_m"] = float(radius)
+
+    confidence = _safe_float(coarse.get("confidence"))
+    if confidence is not None:
+        out["confidence"] = max(0.0, min(1.0, float(confidence)))
+
+    method = str(coarse.get("method", "")).strip()
+    if method:
+        out["method"] = method
+
+    seed_source = str(coarse.get("seed_source", "")).strip()
+    if seed_source:
+        out["seed_source"] = seed_source
+
+    return out
+
+
+def _search_radius_m(
+        seed_source: str,
+        seed: Dict[str, Any],
+        exif_seed: Dict[str, Any],
+        cfg: Dict[str, Any],
+) -> float:
     default_radius = float(cfg.get("default_search_radius_m", 35.0))
     min_radius = float(cfg.get("min_search_radius_m", 8.0))
     max_radius = float(cfg.get("max_search_radius_m", 150.0))
+
+    if str(seed_source).lower() == "coarse":
+        coarse_default = float(cfg.get("coarse_default_refine_radius_m", 45.0))
+        coarse_min = float(cfg.get("coarse_min_refine_radius_m", 20.0))
+        coarse_max = float(cfg.get("coarse_max_refine_radius_m", min(max_radius, 90.0)))
+        coarse_scale = float(cfg.get("coarse_radius_scale", 0.08))
+
+        base = _safe_float(seed.get("local_refine_radius_m"))
+        if base is None or base <= 0.0:
+            coarse_radius = _safe_float(seed.get("search_radius_m"))
+            if coarse_radius is not None and coarse_radius > 0.0:
+                base = max(coarse_min, min(coarse_max, float(coarse_radius) * coarse_scale))
+            else:
+                base = coarse_default
+
+            coarse_conf = _safe_float(seed.get("confidence"))
+            if coarse_conf is not None:
+                if coarse_conf >= 0.80:
+                    base = min(base, float(cfg.get("coarse_high_conf_radius_m", 30.0)))
+                elif coarse_conf < 0.45:
+                    base = max(base, float(cfg.get("coarse_low_conf_radius_m", 60.0)))
+
+        return max(min_radius, min(max_radius, float(base)))
 
     if "gps_hposition_error_m" in exif_seed:
         base = max(6.0, float(exif_seed["gps_hposition_error_m"]) * 1.5)
@@ -191,7 +264,6 @@ def _primary_vehicle(detections: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _meters_per_deg_lat() -> float:
     return 111320.0
 
-
 def _refined_heading(exif_heading: Optional[float], nearest_road: Dict[str, Any], cfg: Dict[str, Any]) -> Tuple[Optional[float], str]:
     road_status = str(nearest_road.get("status", ""))
     if road_status != "ok":
@@ -205,13 +277,13 @@ def _refined_heading(exif_heading: Optional[float], nearest_road: Dict[str, Any]
             return _norm_angle(float(exif_heading)), "exif"
         return None, "none"
 
-    if exif_heading is None:
-        return None, "none"
-
-    heading = _norm_angle(float(exif_heading))
     cand1 = _norm_angle(float(road_bearing))
     cand2 = _norm_angle(float(road_bearing) + 180.0)
 
+    if exif_heading is None:
+        return cand1, "road_axis"
+
+    heading = _norm_angle(float(exif_heading))
     chosen = cand1 if _angle_delta(heading, cand1) <= _angle_delta(heading, cand2) else cand2
     max_snap = float(cfg.get("max_heading_snap_deg", 35.0))
 
@@ -219,7 +291,6 @@ def _refined_heading(exif_heading: Optional[float], nearest_road: Dict[str, Any]
         return chosen, "road_axis_snapped"
 
     return heading, "exif"
-
 
 def _meters_per_deg_lon(lat_deg: float) -> float:
     return max(1e-6, 111320.0 * math.cos(math.radians(lat_deg)))
@@ -425,11 +496,31 @@ def refine_camera_pose(
     artifacts = artifacts or {}
 
     exif_seed = _read_exif_seed(image_path)
-    init_lat = exif_seed.get("lat")
-    init_lon = exif_seed.get("lon")
+    coarse_seed = _read_coarse_seed(artifacts)
+
+    seed_source = "none"
+    init_lat = None
+    init_lon = None
+
+    if "lat" in coarse_seed and "lon" in coarse_seed:
+        seed_source = "coarse"
+        init_lat = coarse_seed.get("lat")
+        init_lon = coarse_seed.get("lon")
+    elif "lat" in exif_seed and "lon" in exif_seed:
+        seed_source = "exif"
+        init_lat = exif_seed.get("lat")
+        init_lon = exif_seed.get("lon")
+
     exif_heading = exif_seed.get("heading_deg")
 
-    search_radius_m = _search_radius_m(exif_seed, cfg)
+    active_seed = coarse_seed if seed_source == "coarse" else exif_seed
+    search_radius_m = _search_radius_m(
+        seed_source=seed_source,
+        seed=active_seed,
+        exif_seed=exif_seed,
+        cfg=cfg,
+    )
+
     primary_vehicle = _primary_vehicle(detections)
     scene_cfg = cfg.get("scene_features", {}) if isinstance(cfg.get("scene_features", {}), dict) else {}
     scene_features = extract_scene_features(
@@ -451,7 +542,7 @@ def refine_camera_pose(
             "camera_refined_azimuth_deg": None,
             "camera_confidence": 0.0,
             "camera_uncertainty_m": round(float(search_radius_m), 3),
-            "refine_method": "seed_window_offline_context_v1",
+            "refine_method": "coarse_or_exif_seed_candidate_search_v1",
             "refine_debug_path": "",
             "needs_manual_review": True,
             "seed_source": "none",
@@ -468,6 +559,8 @@ def refine_camera_pose(
                 "detections_count": int(len(detections)),
                 "has_cleaned_image": bool(artifacts.get("cleaned_image_path")),
                 "has_csv": bool(artifacts.get("csv_path")),
+                "has_coarse_seed": bool(coarse_seed),
+                "has_exif_seed": bool(exif_seed.get("lat") is not None and exif_seed.get("lon") is not None),
             },
         }
 
@@ -501,8 +594,16 @@ def refine_camera_pose(
         best_score = 0.0
 
     confidence = 0.25
-    if exif_seed.get("raw_gps"):
+
+    if seed_source == "coarse":
+        coarse_conf = _safe_float(coarse_seed.get("confidence"))
+        if coarse_conf is not None:
+            confidence += 0.15 * max(0.0, min(1.0, float(coarse_conf)))
+        else:
+            confidence += 0.08
+    elif exif_seed.get("raw_gps"):
         confidence += 0.15
+
     if nearest_road.get("status") == "ok":
         confidence += 0.15
     if nearest_road.get("within_search_radius") is True:
@@ -511,6 +612,7 @@ def refine_camera_pose(
         confidence += 0.10
     if refined_heading is not None:
         confidence += 0.10
+
     confidence += 0.25 * max(0.0, min(1.0, float(best_score)))
     confidence = max(0.0, min(1.0, confidence))
 
@@ -533,19 +635,22 @@ def refine_camera_pose(
         "camera_refined_azimuth_deg": round(float(refined_heading), 3) if refined_heading is not None else None,
         "camera_confidence": round(float(confidence), 6),
         "camera_uncertainty_m": round(float(uncertainty), 3),
-        "refine_method": "seed_window_candidate_search_v1",
+        "refine_method": "coarse_seed_candidate_search_v1" if seed_source == "coarse" else "seed_window_candidate_search_v1",
         "refine_debug_path": "",
         "needs_manual_review": needs_manual_review,
-        "seed_source": "exif",
+        "seed_source": seed_source,
         "azimuth_source": str(candidate_search.get("heading_source", "")),
         "offline_context": offline_context,
         "candidate_search": candidate_search,
         "primary_vehicle": primary_vehicle,
+        "scene_features": scene_features,
         "inputs": {
             "image_w": int(image_w),
             "image_h": int(image_h),
             "detections_count": int(len(detections)),
             "has_cleaned_image": bool(artifacts.get("cleaned_image_path")),
             "has_csv": bool(artifacts.get("csv_path")),
+            "has_coarse_seed": bool(coarse_seed),
+            "has_exif_seed": bool(exif_seed.get("lat") is not None and exif_seed.get("lon") is not None),
         },
     }

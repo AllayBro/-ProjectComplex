@@ -235,7 +235,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
     row3->addWidget(m_device, 0, Qt::AlignLeft | Qt::AlignVCenter);
     row3->addStretch(1);
 
-    m_run = new QPushButton("Запуск полного режима (детекция → расстояние → CSV → очистка)");
+    m_run = new QPushButton("Полный режим");
     m_run->setFixedHeight(actionBtnH);
 
     m_view = new ResultView();

@@ -31,9 +31,15 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="19.03 - v0.6.1 - Fix CI/CD">
-      <change beforePath="$PROJECT_DIR$/.github/workflows/ci.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/ci.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.github/workflows/release.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/release.yml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/py_src/full_distance/coarse_geo_search.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/full_distance.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/full_distance.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/offline_map_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/offline_map_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -191,6 +197,11 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="traffic" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="traffic" CONFIG_NAME="Release" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="traffic">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -264,7 +275,9 @@
       <workItem from="1773830275222" duration="5681000" />
       <workItem from="1773837549680" duration="2202000" />
       <workItem from="1773864424774" duration="4000" />
-      <workItem from="1773898756340" duration="4080000" />
+      <workItem from="1773898756340" duration="4694000" />
+      <workItem from="1773911992065" duration="2191000" />
+      <workItem from="1773923049611" duration="12967000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -522,7 +535,15 @@
       <option name="project" value="LOCAL" />
       <updated>1773910454467</updated>
     </task>
-    <option name="localTasksCounter" value="33" />
+    <task id="LOCAL-00033" summary="19.03 - v0.6.1 - Fix CI/CD">
+      <option name="closed" value="true" />
+      <created>1773910931999</created>
+      <option name="number" value="00033" />
+      <option name="presentableId" value="LOCAL-00033" />
+      <option name="project" value="LOCAL" />
+      <updated>1773910931999</updated>
+    </task>
+    <option name="localTasksCounter" value="34" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

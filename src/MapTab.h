@@ -1,20 +1,17 @@
 #pragma once
 #include <QWidget>
 #include <QHash>
-
+#include <QVariant>
 #include "AppConfig.h"
 #include "ModelTypes.h"
 
 class QQuickWidget;
 class QQuickItem;
 class QLabel;
-class QTextEdit;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
 class QPushButton;
-class QComboBox;
-class QDoubleSpinBox;
 
 class MapTab : public QWidget {
     Q_OBJECT
@@ -33,12 +30,12 @@ private slots:
     void onSetDirectionMode();
     void onClearGeoRef();
     void onSaveGeoRef();
-    void onLocationSourceChanged();
-    void onUncertaintyChanged(double value);
 
     void probeNetworkNow();
     void onProbeFinished();
     void onProbeTimeout();
+
+
 
 private:
     enum class EditMode {
@@ -88,7 +85,7 @@ private:
         bool vehicleNeedsManualReview = false;
         QString vehicleGeoStatus;
         QString vehicleGeoJsonPath;
-
+        QVariantList vehiclePoints;
         QString make;
         QString model;
         QString dateTime;
@@ -98,6 +95,15 @@ private:
 
         bool hasResult = false;
         ModuleResult result;
+
+        bool hasCoarseGeo = false;
+        double coarseLat = 0.0;
+        double coarseLon = 0.0;
+        double coarseRadiusM = 0.0;
+        double coarseConfidence = 0.0;
+        QString coarseMethod;
+        QString coarseSeedSource;
+        QString coarseGeoJsonPath;
     };
 
     AppConfig m_cfg;
@@ -105,15 +111,11 @@ private:
     QQuickWidget* m_quick = nullptr;
 
     QLabel* m_netStatus = nullptr;
-    QLabel* m_preview = nullptr;
-    QTextEdit* m_info = nullptr;
     QLabel* m_geoStatus = nullptr;
     QPushButton* m_btnSetCameraPoint = nullptr;
     QPushButton* m_btnSetDirection = nullptr;
     QPushButton* m_btnClearGeoRef = nullptr;
     QPushButton* m_btnSaveGeoRef = nullptr;
-    QComboBox* m_locationSource = nullptr;
-    QDoubleSpinBox* m_uncertainty = nullptr;
 
     QHash<QString, Item> m_items;
     QString m_selected;
@@ -126,7 +128,6 @@ private:
     bool m_onlineOk = true;
     bool m_probeSeen = false;
     EditMode m_editMode = EditMode::Idle;
-    bool m_updatingControls = false;
 
     void initQml();
     void applyEffectiveModeToQml();
@@ -137,6 +138,7 @@ private:
     void updateGeoStatus(const QString& text = QString());
     void updateGeoControlsFromSelection();
     void syncSelectedToQml();
+    void applyCoarseGeoSearch(const QJsonObject& artifactsObj, Item& out);
 
     static bool readExifMini(const QString& imagePath, Item& out);
     static void applyRunnerExif(const QJsonObject& exifObj, Item& out);
@@ -149,4 +151,8 @@ private:
     static bool saveGeoRef(const Item& it, QString* err = nullptr);
     static double normalizeAzimuth(double value);
     static double azimuthDegrees(double lat1, double lon1, double lat2, double lon2);
+    static QString autoSidecarLocationSource(const Item& it);
+    static double autoSidecarUncertaintyM(const Item& it);
+    static bool isManualReviewRecommended(const Item& it);
+    static bool isLocalExifRefine(const Item& it);
 };

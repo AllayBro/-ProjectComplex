@@ -260,7 +260,68 @@ def _nearest_road(
     best["status"] = "ok"
     best["within_search_radius"] = bool(float(best["distance_m"]) <= max(radius_m, 1.0))
     return best
+def _segment_length_m(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
+    return _haversine_m(a_lat, a_lon, b_lat, b_lon)
 
+
+def _segment_midpoint(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> Tuple[float, float]:
+    return (0.5 * (float(a_lat) + float(b_lat)), 0.5 * (float(a_lon) + float(b_lon)))
+
+
+def _road_candidates(
+        roads: List[Dict[str, Any]],
+        center_lat: float,
+        center_lon: float,
+        radius_m: float,
+        top_k: int,
+) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+
+    for feature_index, feature in enumerate(roads):
+        geom = feature.get("geometry", {}) or {}
+        props = feature.get("properties", {}) or {}
+        lines = _iter_lines(geom)
+        if not lines:
+            continue
+
+        for line_index, line in enumerate(lines):
+            for segment_index in range(len(line) - 1):
+                a_lat, a_lon = line[segment_index]
+                b_lat, b_lon = line[segment_index + 1]
+
+                dist_m, proj_lat, proj_lon = _project_point_to_segment(
+                    center_lat, center_lon, a_lat, a_lon, b_lat, b_lon
+                )
+
+                seg_len_m = _segment_length_m(a_lat, a_lon, b_lat, b_lon)
+                mid_lat, mid_lon = _segment_midpoint(a_lat, a_lon, b_lat, b_lon)
+
+                candidates.append({
+                    "distance_m": round(float(dist_m), 3),
+                    "point_lat": round(float(proj_lat), 8),
+                    "point_lon": round(float(proj_lon), 8),
+                    "mid_lat": round(float(mid_lat), 8),
+                    "mid_lon": round(float(mid_lon), 8),
+                    "segment_length_m": round(float(seg_len_m), 3),
+                    "segment_bearing_deg": round(float(_bearing_deg(a_lat, a_lon, b_lat, b_lon)), 3),
+                    "feature_index": int(feature_index),
+                    "line_index": int(line_index),
+                    "segment_index": int(segment_index),
+                    "within_search_radius": bool(float(dist_m) <= max(radius_m, 1.0)),
+                    "properties": props,
+                })
+
+    candidates.sort(
+        key=lambda c: (
+            float(c.get("distance_m", 1e18)),
+            -float(c.get("segment_length_m", 0.0)),
+        )
+    )
+
+    if top_k > 0:
+        candidates = candidates[:top_k]
+
+    return candidates
 
 def _extract_features(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
     feats = doc.get("features", None)
@@ -283,6 +344,7 @@ def load_offline_context(center_lat: Optional[float], center_lon: Optional[float
             "buildings": {"path": "", "exists": False, "total": 0, "selected": 0},
         },
         "nearest_road": {"status": "not_found"},
+        "road_candidates": [],
     }
 
     if center_lat is None or center_lon is None:
@@ -329,5 +391,20 @@ def load_offline_context(center_lat: Optional[float], center_lon: Optional[float
         if layer_name == "roads":
             selected_roads = selected
 
-    out["nearest_road"] = _nearest_road(selected_roads, float(center_lat), float(center_lon), float(search_radius_m))
+    out["nearest_road"] = _nearest_road(
+        selected_roads,
+        float(center_lat),
+        float(center_lon),
+        float(search_radius_m),
+    )
+
+    top_k = int(cfg.get("candidate_roads_top_k", 32) or 32)
+    out["road_candidates"] = _road_candidates(
+        selected_roads,
+        float(center_lat),
+        float(center_lon),
+        float(search_radius_m),
+        top_k,
+    )
+
     return out
