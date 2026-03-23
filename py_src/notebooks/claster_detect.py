@@ -9,7 +9,7 @@ Original file is located at
 
 import os
 import time
-
+from typing import Any, Dict, List
 try:
     import torch
 except Exception:
@@ -310,21 +310,65 @@ def detect_cars_on_tiles_whole(image):
 
     return cluster_boxes_iou(all_boxes)
 
+def _vehicle_color_bgr(cls_name: str) -> tuple[int, int, int]:
+    cls = str(cls_name or "").strip().lower()
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+def _annotation_style(H: int, W: int):
+    scale = max(1.0, float(max(H, W)) / 1600.0)
+    return {
+        "font": cv2.FONT_HERSHEY_SIMPLEX,
+        "font_scale": 0.8 * scale,
+        "box_thickness": max(2, int(round(2.0 * scale))),
+        "text_thickness": max(2, int(round(2.0 * scale))),
+        "text_outline": max(4, int(round(5.0 * scale))),
+        "pad_x": max(8, int(round(8.0 * scale))),
+        "pad_y": max(6, int(round(6.0 * scale))),
+        "top_gap": max(10, int(round(10.0 * scale))),
+    }
+
+
+def _draw_box_and_label(img_vis, x1, y1, x2, y2, label, color, style):
+    cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, int(style["box_thickness"]))
+
+    font = style["font"]
+    font_scale = float(style["font_scale"])
+    text_thickness = int(style["text_thickness"])
+    outline = int(style["text_outline"])
+    pad_x = int(style["pad_x"])
+    pad_y = int(style["pad_y"])
+    top_gap = int(style["top_gap"])
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+
+    tx = max(0, x1)
+    ty = max(th + pad_y, y1 - top_gap)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(img_vis.shape[1] - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(img_vis.shape[0] - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img_vis, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img_vis, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline, cv2.LINE_AA)
+    cv2.putText(img_vis, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
 
 
 def draw_cars(image, boxes, clustered_indices=None):
-    """
-    image             – исходное изображение.
-    boxes             – список боксов [x1, y1, x2, y2, conf, cls_id].
-    clustered_indices – множество номеров машин (1-based), которые
-                        были доуточнены кластерно (через тайлы).
-    """
     if clustered_indices is None:
         clustered_indices = set()
 
     img_vis = image.copy()
     H, W = img_vis.shape[:2]
+    style = _annotation_style(H, W)
 
+    cls_map = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
     sizes = []
 
     for idx, b in enumerate(boxes, start=1):
@@ -337,21 +381,17 @@ def draw_cars(image, boxes, clustered_indices=None):
 
         w = x2 - x1
         h = y2 - y1
-        sizes.append((idx, w, h))
+        if w <= 0 or h <= 0:
+            continue
 
-        # подпись на изображении – только номер и размеры
-        label = f"#{idx}: {w}x{h}"
-        cv2.rectangle(img_vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
-        cv2.putText(
-            img_vis,
-            label,
-            (x1, max(0, y1 - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 0),
-            2,
-            lineType=cv2.LINE_AA
-        )
+        sizes.append((idx, w, h))
+        refined = idx in clustered_indices
+
+        cls_name = cls_map.get(int(cls_id), str(int(cls_id)))
+        color = _vehicle_color_bgr(cls_name)
+        label = f"{cls_name} {idx}{'T' if refined else ''} {w}x{h}px"
+
+        _draw_box_and_label(img_vis, x1, y1, x2, y2, label, color, style)
 
     img_rgb = cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB)
     plt.figure(figsize=(10, 8))
@@ -366,11 +406,9 @@ def draw_cars(image, boxes, clustered_indices=None):
     print("Размеры машин (номер, ширина, высота):")
     for idx, w, h in sizes:
         if idx in clustered_indices:
-            # кластерная машина – буква Т в номере
             print(f"  #{idx}Т: {w} x {h} пикселей")
         else:
             print(f"  #{idx}: {w} x {h} пикселей")
-
 
 
 def refine_car_with_tiles_whole(image, base_box):
@@ -734,6 +772,10 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     dets = []
     vis = img.copy()
+    style = _annotation_style(H, W)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    brightness = round(float(np.mean(gray)), 2)
 
     for idx, b in enumerate(final_boxes, start=1):
         x1, y1, x2, y2, conf, cls_id = b
@@ -747,22 +789,44 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             continue
 
         refined = (idx in clustered_indices)
+        cls_name = cls_map.get(int(cls_id), str(int(cls_id)))
+        color = _vehicle_color_bgr(cls_name)
 
-        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
-        label = f"#{idx}{'T' if refined else ''}"
-        cv2.putText(vis, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(vis, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
+        w_px = int(x2 - x1)
+        h_px = int(y2 - y1)
+        cluster_metric = f"{w_px}x{h_px}px"
+
+        label = f"{cls_name} {idx}{'T' if refined else ''} {cluster_metric}"
+        _draw_box_and_label(vis, x1, y1, x2, y2, label, color, style)
 
         dets.append({
             "bbox_xyxy": [x1, y1, x2, y2],
             "conf": float(conf),
             "cls_id": int(cls_id),
-            "cls_name": cls_map.get(int(cls_id), str(int(cls_id))),
-            "meta": {"refined": bool(refined)}
+            "cls_name": cls_name,
+            "meta": {
+                "refined": bool(refined),
+                "w_px": int(w_px),
+                "h_px": int(h_px),
+                "cluster_metric": cluster_metric,
+                "brightness": float(brightness),
+            }
         })
 
     annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_3.jpg"))
     cv2.imwrite(annotated_path, vis)
+
+    csv_path = os.path.abspath(os.path.join(out_dir, "cluster_results.csv"))
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,cluster_metric,brightness,refined\n")
+        for i, d in enumerate(dets, start=1):
+            x1, y1, x2, y2 = d["bbox_xyxy"]
+            meta = d.get("meta", {}) or {}
+            f.write(
+                f"{os.path.basename(fname)},{i},{d['cls_name']},{x1},{y1},{x2},{y2},"
+                f"{meta.get('w_px', '')},{meta.get('h_px', '')},{float(d['conf']):.6f},"
+                f"{meta.get('cluster_metric', '')},{meta.get('brightness', '')},{int(bool(meta.get('refined', False)))}\n"
+            )
 
     total_ms = int(round((time.time() - t0) * 1000))
 
@@ -777,7 +841,9 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         "artifacts": {
             "input_filename": os.path.basename(fname),
             "clustered_indices": sorted(list(clustered_indices)),
-            "counts": {"full": int(len(full_boxes) if full_boxes else 0), "final": int(len(dets))}
+            "counts": {"full": int(len(full_boxes) if full_boxes else 0), "final": int(len(dets))},
+            "csv_path": csv_path,
+            "brightness": brightness,
         },
         "timings_ms": {"total": total_ms, "preprocess": 0, "inference": 0, "postprocess": 0},
         "detections": dets

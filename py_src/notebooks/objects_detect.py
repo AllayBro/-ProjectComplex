@@ -46,6 +46,106 @@ VEHICLE_DIMENSIONS_DEFAULT = {
     "default": (1.85, 1.5, 4.5),
 }
 
+def _vehicle_color_bgr(cls_name):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+
+def _draw_box_and_label(img, x1, y1, x2, y2, label, color):
+    # Единый масштаб “рамка/шрифт” по размеру исходного изображения.
+    # Это нужно, чтобы подписи читались одинаково при разных разрешениях.
+    H, W = img.shape[:2]
+    scale = max(1.0, float(max(H, W)) / 1600.0)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8 * scale
+    box_thickness = max(2, int(round(2.0 * scale)))
+    text_thickness = max(2, int(round(2.0 * scale)))
+    outline_thickness = max(4, int(round(5.0 * scale)))
+    pad_x = max(8, int(round(8.0 * scale)))
+    pad_y = max(6, int(round(6.0 * scale)))
+    top_gap = max(10, int(round(10.0 * scale)))
+
+    x1 = int(x1)
+    y1 = int(y1)
+    x2 = int(x2)
+    y2 = int(y2)
+
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, box_thickness)
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+    tx = max(0, x1)
+    ty = max(th + pad_y, y1 - top_gap)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(W - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(H - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline_thickness, cv2.LINE_AA)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
+def _normalized_vehicle_class(cls_name):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "van":
+        return "car"
+    return cls
+
+
+def _vehicle_color_bgr(cls_name):
+    cls = _normalized_vehicle_class(cls_name)
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+
+def _draw_box_and_label(img, x1, y1, x2, y2, label, color):
+    # Дублирующаяся функция в файле: сделаем ее такой же, как и первая.
+    # (В Python более поздняя версия переопределяет предыдущую, но так меньше шансов
+    # получить “разный стиль” при рефакторинге.)
+    H, W = img.shape[:2]
+    scale = max(1.0, float(max(H, W)) / 1600.0)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8 * scale
+    box_thickness = max(2, int(round(2.0 * scale)))
+    text_thickness = max(2, int(round(2.0 * scale)))
+    outline_thickness = max(4, int(round(5.0 * scale)))
+    pad_x = max(8, int(round(8.0 * scale)))
+    pad_y = max(6, int(round(6.0 * scale)))
+    top_gap = max(10, int(round(10.0 * scale)))
+
+    x1 = int(x1)
+    y1 = int(y1)
+    x2 = int(x2)
+    y2 = int(y2)
+
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, box_thickness)
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+    tx = max(0, x1)
+    ty = max(th + pad_y, y1 - top_gap)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(W - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(H - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline_thickness, cv2.LINE_AA)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
 
 def _rat_to_float(v):
     if v is None:
@@ -377,7 +477,7 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         except Exception:
             cls_id = -1
 
-        cls_name = names.get(cls_id, "default")
+        cls_name = _normalized_vehicle_class(names.get(cls_id, "default"))
 
         if filter_vehicle_only and (cls_name not in vehicle_classes):
             continue
@@ -394,15 +494,11 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             except Exception:
                 dist_m = None
 
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        color = _vehicle_color_bgr(cls_name)
         label = f"{cls_name} {det_idx}"
         if dist_m is not None:
-            label = f"{label} ~{dist_m}m"
-        pt = (x1, max(20, y1 - 10))
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(annotated, label, pt, font, 0.8, (0, 0, 0), 5, cv2.LINE_AA)
-        cv2.putText(annotated, label, pt, font, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-
+            label += f" ~{dist_m}m"
+        _draw_box_and_label(annotated, x1, y1, x2, y2, label, color)
         cleaned[y1:y2, x1:x2] = img_bgr[y1:y2, x1:x2]
 
         detections.append(

@@ -65,7 +65,7 @@ CFG = {
     "CLS_ROOT": "/content/data_cls",
 
     "MODEL_PATH": "/content/drive/MyDrive/DRONE/data_det/yolo11x-visdrone.pt",
-    "KEEP_CLASS_NAMES": {"car", "van", "truck", "bus"},
+    "KEEP_CLASS_NAMES": {"car", "van", "truck", "bus", "motorcycle"},
 
     "TILE": 640,
     "OVERLAP": 0.2,
@@ -101,11 +101,59 @@ PRED_DEVICE = pick_device(prefer_gpu=True)
 CLS_DEVICE  = pick_device(prefer_gpu=True)
 
 log(f"PRED_DEVICE={PRED_DEVICE}, CLS_DEVICE={CLS_DEVICE}")
-
-
                                         # yolo11x-visdrone.pt")
                                         # yolo11s-visdrone.pt")
 HF_URL = "https://huggingface.co/erbayat/yolov11x-visdrone/resolve/main/yolo11x-visdrone.pt"
+def _normalized_vehicle_class(cls_name):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "van":
+        return "car"
+    return cls
+
+
+def _vehicle_color_bgr(cls_name):
+    cls = _normalized_vehicle_class(cls_name)
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+
+def _draw_box_and_label(img, x1, y1, x2, y2, label, color):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8
+    box_thickness = 2
+    text_thickness = 2
+    outline_thickness = 5
+    pad_x = 8
+    pad_y = 6
+
+    cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, box_thickness)
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+    tx = max(0, int(x1))
+    ty = max(th + pad_y, int(y1) - 10)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(img.shape[1] - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(img.shape[0] - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline_thickness, cv2.LINE_AA)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
+
+def _box_cls_id(b):
+    if len(b) > 5:
+        try:
+            return int(b[5])
+        except Exception:
+            return None
+    return None
 
 def _hf_default_cache_dir() -> Path:
     # Кроссплатформенный кэш: Windows/Linux
@@ -260,7 +308,16 @@ def nms_union(boxes, thr=0.5):
     boxes = sorted(boxes, key=lambda x: x[4], reverse=True)
     kept = []
     for b in boxes:
-        if all(iou_xyxy(b[:4], k[:4]) <= thr for k in kept):
+        drop = False
+        for k in kept:
+            cls_b = _box_cls_id(b)
+            cls_k = _box_cls_id(k)
+            if cls_b is not None and cls_k is not None and cls_b != cls_k:
+                continue
+            if iou_xyxy(b[:4], k[:4]) > thr:
+                drop = True
+                break
+        if not drop:
             kept.append(b)
     return kept
 
@@ -313,40 +370,45 @@ def _vk_merge_parts_union(boxes, W, H,
         if ra != rb:
             parent[rb] = ra
 
-    # предрасчёт размеров/центров (ничего не фильтруем!)
     P = []
-    for (x1, y1, x2, y2, c) in boxes:
-        x1f = float(x1); y1f = float(y1); x2f = float(x2); y2f = float(y2)
+    for box in boxes:
+        x1, y1, x2, y2, c = box[:5]
+        tail = tuple(box[5:])
+        x1f = float(x1)
+        y1f = float(y1)
+        x2f = float(x2)
+        y2f = float(y2)
         w = max(1.0, x2f - x1f)
         h = max(1.0, y2f - y1f)
         cx = 0.5 * (x1f + x2f)
         cy = 0.5 * (y1f + y2f)
-        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy))
+        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy, tail))
 
     for i in range(n):
-        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi = P[i]
-        for j in range(i + 1, n):
-            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj = P[j]
+        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi, tail_i = P[i]
+        cls_i = tail_i[0] if len(tail_i) > 0 else None
 
-            # защита от склейки далёких разных объектов (без жёстких пиксельных порогов)
+        for j in range(i + 1, n):
+            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj, tail_j = P[j]
+            cls_j = tail_j[0] if len(tail_j) > 0 else None
+
+            if cls_i is not None and cls_j is not None and cls_i != cls_j:
+                continue
             if abs(cxi - cxj) > float(center_frac) * max(wi, wj):
                 continue
             if abs(cyi - cyj) > float(center_frac) * max(hi, hj):
                 continue
 
-            # 1) обычный IoU
             if iou_xyxy((x1i, y1i, x2i, y2i), (x1j, y1j, x2j, y2j)) >= float(iou_thr):
                 unite(i, j)
                 continue
 
-            # 2) IoU расширенных боксов (чтобы “детали” машины слипались)
             ei = _vk_expand_xyxy(x1i, y1i, x2i, y2i, exp_frac, W, H)
             ej = _vk_expand_xyxy(x1j, y1j, x2j, y2j, exp_frac, W, H)
             if iou_xyxy(ei, ej) >= float(exp_iou_thr):
                 unite(i, j)
                 continue
 
-            # 3) осевое перекрытие + малый разрыв (перед/зад/стекло/фара)
             yov = _vk_axis_overlap_ratio(y1i, y2i, y1j, y2j)
             xov = _vk_axis_overlap_ratio(x1i, x2i, x1j, x2j)
             xgap = _vk_interval_gap(x1i, x2i, x1j, x2j)
@@ -370,7 +432,10 @@ def _vk_merge_parts_union(boxes, W, H,
         y1 = min(P[k][1] for k in comp)
         x2 = max(P[k][2] for k in comp)
         y2 = max(P[k][3] for k in comp)
-        c = max(P[k][4] for k in comp)
+
+        best_k = max(comp, key=lambda k: P[k][4])
+        c = P[best_k][4]
+        tail = P[best_k][9]
 
         x1 = int(max(0, min(int(round(x1)), W - 1)))
         y1 = int(max(0, min(int(round(y1)), H - 1)))
@@ -378,7 +443,7 @@ def _vk_merge_parts_union(boxes, W, H,
         y2 = int(max(0, min(int(round(y2)), H - 1)))
 
         if x2 > x1 and y2 > y1:
-            merged.append((x1, y1, x2, y2, float(c)))
+            merged.append((x1, y1, x2, y2, float(c), *tail))
 
     merged.sort(key=lambda t: t[4], reverse=True)
     return merged
@@ -390,7 +455,9 @@ def filter_boxes_geom(boxes, cfg=None):
     ar_min = float(cfg.get("ar_min", 0.25))
     ar_max = float(cfg.get("ar_max", 5.0))
     min_side = int(cfg.get("min_side", 4))
-    for (x1, y1, x2, y2, c) in boxes:
+    for box in boxes:
+        x1, y1, x2, y2, c = box[:5]
+        tail = tuple(box[5:])
         w = x2 - x1
         h = y2 - y1
         if w <= 0 or h <= 0:
@@ -401,7 +468,7 @@ def filter_boxes_geom(boxes, cfg=None):
         ar = w / float(h)
         if ar < ar_min or ar > ar_max:
             continue
-        out.append((x1, y1, x2, y2, c))
+        out.append((x1, y1, x2, y2, c, *tail))
     return out
 
 def crop_with_pad(img, x1, y1, x2, y2, pad=0.8):
@@ -502,27 +569,43 @@ def predict_boxes(model, img_bgr, conf, iou, imgsz, max_det, keep_ids=None):
         device=PRED_DEVICE,
         verbose=False
     )[0]
+
+    names = model.names
     out = []
+
     for b in r.boxes:
         cls_id = int(b.cls.item())
         if keep_ids is not None and cls_id not in keep_ids:
             continue
+
+        cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
+        cls_name = _normalized_vehicle_class(cls_name)
+
         x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-        out.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item())))
+        out.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item()), int(cls_id), str(cls_name)))
+
     return out
 
 def detect_tiled_fast(model, img_bgr,
                       conf=None, iou=None, imgsz=None, max_det=None,
                       nms_thr=None, batch=None, tile=None, overlap=None,
                       keep_ids=None):
-    if conf is None:   conf = float(CFG["DET_CONF"])
-    if iou is None:    iou = float(CFG["DET_IOU"])
-    if imgsz is None:  imgsz = int(TILED_IMGSZ)
-    if max_det is None: max_det = int(CFG["DET_MAX_DET"])
-    if nms_thr is None: nms_thr = float(CFG["DET_NMS_THR"])
-    if batch is None:  batch = int(CFG["TILED_BATCH"])
-    if tile is None:   tile = int(TILE)
-    if overlap is None: overlap = float(OVERLAP)
+    if conf is None:
+        conf = float(CFG["DET_CONF"])
+    if iou is None:
+        iou = float(CFG["DET_IOU"])
+    if imgsz is None:
+        imgsz = int(TILED_IMGSZ)
+    if max_det is None:
+        max_det = int(CFG["DET_MAX_DET"])
+    if nms_thr is None:
+        nms_thr = float(CFG["DET_NMS_THR"])
+    if batch is None:
+        batch = int(CFG["TILED_BATCH"])
+    if tile is None:
+        tile = int(TILE)
+    if overlap is None:
+        overlap = float(OVERLAP)
 
     H, W = img_bgr.shape[:2]
     if tile > H or tile > W:
@@ -543,22 +626,22 @@ def detect_tiled_fast(model, img_bgr,
     offs = []
     for ty in ys:
         for tx in xs:
-            t = img_bgr[ty:ty+tile, tx:tx+tile]
+            t = img_bgr[ty:ty + tile, tx:tx + tile]
             if t.shape[0] == tile and t.shape[1] == tile:
                 tiles.append(t)
                 offs.append((tx, ty))
 
     if not tiles:
-      return nms_union(
-          predict_boxes(model, img_bgr, conf, iou, imgsz, max_det, keep_ids=keep_ids),
-          thr=nms_thr
-      )
+        return nms_union(
+            predict_boxes(model, img_bgr, conf, iou, imgsz, max_det, keep_ids=keep_ids),
+            thr=nms_thr
+        )
 
-
+    names = model.names
     all_boxes = []
     for i0 in range(0, len(tiles), batch):
-        chunk = tiles[i0:i0+batch]
-        chunk_offs = offs[i0:i0+batch]
+        chunk = tiles[i0:i0 + batch]
+        chunk_offs = offs[i0:i0 + batch]
         rs = model.predict(
             chunk,
             conf=conf,
@@ -573,8 +656,14 @@ def detect_tiled_fast(model, img_bgr,
                 cls_id = int(b.cls.item())
                 if keep_ids is not None and cls_id not in keep_ids:
                     continue
+
+                cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
+                cls_name = _normalized_vehicle_class(cls_name)
+
                 x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-                all_boxes.append((int(x1)+tx, int(y1)+ty, int(x2)+tx, int(y2)+ty, float(b.conf.item())))
+                all_boxes.append(
+                    (int(x1) + tx, int(y1) + ty, int(x2) + tx, int(y2) + ty, float(b.conf.item()), int(cls_id), str(cls_name))
+                )
 
     return nms_union(all_boxes, thr=nms_thr)
 
@@ -749,12 +838,6 @@ if __name__ == "__main__":
                 display(IPImage(filename=str(fp)))
     if __name__ == "__main__":
         init_data()
-    # 5 - СВЕРХСКОРОСТЬ ДО 1 СЕКУНДЫ! ВОТ ТАКОЙ СКОРОСТИ НАДО ДЛЯ ОСТАЛЬНЫХ ПРОГРАММ ДОБИТЬСЯ! (потому что программа скорее всего работала на на GPU)
-
-
-
-
-
 
     det = get_det_model()
     keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
@@ -1589,7 +1672,10 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         y_bot = int(round((1.0 - ex_bot) * H))
 
         filtered = []
-        for (x1, y1, x2, y2, c) in boxes:
+        for box in boxes:
+            x1, y1, x2, y2, c = box[:5]
+            tail = tuple(box[5:])
+
             c = float(c)
             if c < min_conf:
                 continue
@@ -1606,7 +1692,8 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             cy = (int(y1) + int(y2)) // 2
             if cy < y_top or cy > y_bot:
                 continue
-            filtered.append((int(x1), int(y1), int(x2), int(y2), c))
+
+            filtered.append((int(x1), int(y1), int(x2), int(y2), c, *tail))
 
         cont_cfg = (pp_cfg.get("containment", {}) or {})
         if bool(cont_cfg.get("enabled", False)) and filtered:
@@ -1657,8 +1744,14 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             center_frac=float(mp_cfg.get("center_frac", 2.0)),
         )
     dets = []
+    vis = img.copy()
+    brightness = round(float(np.mean(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))), 2)
 
-    for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
+    for i, box in enumerate(boxes, 1):
+        x1, y1, x2, y2, c = box[:5]
+        cls_id = int(box[5]) if len(box) > 5 else 0
+        cls_name = _normalized_vehicle_class(box[6] if len(box) > 6 else "vehicle")
+
         x1 = max(0, min(int(x1), W - 1))
         x2 = max(0, min(int(x2), W - 1))
         y1 = max(0, min(int(y1), H - 1))
@@ -1667,15 +1760,43 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         if x2 <= x1 or y2 <= y1:
             continue
 
+        w_px = int(x2 - x1)
+        h_px = int(y2 - y1)
+        cluster_metric = f"{w_px}x{h_px}px"
+
+        color = _vehicle_color_bgr(cls_name)
+        label = f"{cls_name} {i} {cluster_metric}"
+        _draw_box_and_label(vis, x1, y1, x2, y2, label, color)
+
         dets.append(
             {
                 "bbox_xyxy": [x1, y1, x2, y2],
                 "conf": float(c),
-                "cls_id": 0,
-                "cls_name": "vehicle",
-                "meta": {},
+                "cls_id": int(cls_id),
+                "cls_name": str(cls_name),
+                "meta": {
+                    "w_px": int(w_px),
+                    "h_px": int(h_px),
+                    "cluster_metric": cluster_metric,
+                    "brightness": float(brightness),
+                },
             }
         )
+
+    annotated_path = os.path.abspath(os.path.join(out_dir, "annotated_cluster_1.jpg"))
+    cv2.imwrite(annotated_path, vis)
+
+    csv_path = os.path.abspath(os.path.join(out_dir, "cluster_1_results.csv"))
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,cluster_metric,brightness\n")
+        for i, d in enumerate(dets, start=1):
+            x1, y1, x2, y2 = d["bbox_xyxy"]
+            meta = d.get("meta", {}) or {}
+            f.write(
+                f"{os.path.basename(image_path)},{i},{d['cls_name']},{x1},{y1},{x2},{y2},"
+                f"{meta.get('w_px', '')},{meta.get('h_px', '')},{float(d['conf']):.6f},"
+                f"{meta.get('cluster_metric', '')},{meta.get('brightness', '')}\n"
+            )
 
     total_ms = int(round((time.time() - t0) * 1000))
     inf_ms = int(round((t_inf1 - t_inf0) * 1000))
@@ -1686,11 +1807,13 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         "image_h": int(H),
         "device_used": device_used,
         "warnings": warnings,
-        "annotated_image_path": "",
+        "annotated_image_path": annotated_path,
         "cleaned_image_path": "",
         "artifacts": {
             "model_path": str(model_path),
             "count": int(len(dets)),
+            "csv_path": csv_path,
+            "brightness": brightness,
         },
         "timings_ms": {
             "total": total_ms,

@@ -711,37 +711,106 @@ class Cleanup:
 # Visualization + CSV
 # ----------------------------
 
+def _normalized_vehicle_class(cls_name):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "van":
+        return "car"
+    return cls
+
+
+def _vehicle_color_bgr(cls_name):
+    cls = _normalized_vehicle_class(cls_name)
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+
+def _draw_box_and_label(img, x1, y1, x2, y2, label, color):
+    # Единый масштаб “рамка/шрифт” по размеру исходного изображения.
+    # Это нужно, чтобы подписи читались одинаково при разных разрешениях.
+    H, W = img.shape[:2]
+    scale = max(1.0, float(max(H, W)) / 1600.0)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8 * scale
+    box_thickness = max(2, int(round(2.0 * scale)))
+    text_thickness = max(2, int(round(2.0 * scale)))
+    outline_thickness = max(4, int(round(5.0 * scale)))
+    pad_x = max(8, int(round(8.0 * scale)))
+    pad_y = max(6, int(round(6.0 * scale)))
+    top_gap = max(10, int(round(10.0 * scale)))
+
+    x1 = int(x1)
+    y1 = int(y1)
+    x2 = int(x2)
+    y2 = int(y2)
+
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, box_thickness)
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+    tx = max(0, x1)
+    ty = max(th + pad_y, y1 - top_gap)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(W - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(H - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline_thickness, cv2.LINE_AA)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
+
+def _estimate_brightness_from_path(image_path: str):
+    try:
+        img = load_image_any(image_path)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return round(float(np.mean(gray)), 2)
+    except Exception:
+        return ""
+
+def _vehicle_color_bgr(cls_name: str):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
 def draw_annotated(img_bgr: np.ndarray, dets: List[Dict[str, Any]]) -> np.ndarray:
     out = img_bgr.copy()
+
     for i, d in enumerate(dets, start=1):
         x1, y1, x2, y2 = map(int, d["bbox_xyxy"])
-        cls_name = str(d.get("cls_name", ""))
-        conf = float(d.get("conf", 0.0))
-
-        label = f"{i}:{cls_name} {conf:.2f}"
+        cls_name = str(d.get("cls_name", "")).strip().lower()
         meta = d.get("meta", {}) or {}
 
-        if "distance_m" in meta and meta["distance_m"] is not None:
-            label += f" {float(meta['distance_m']):.1f}m"
-        if "r_pos" in meta and meta["r_pos"] is not None:
-            label += f" r={float(meta['r_pos']):.1f}"
-        if "refined" in meta and bool(meta["refined"]):
-            label += " refined"
+        label = f"{cls_name} {i}"
+        if meta.get("distance_m") is not None:
+            label += f" ~{float(meta['distance_m']):.2f}m"
+        elif meta.get("dist_m") is not None:
+            label += f" ~{float(meta['dist_m']):.2f}m"
+        elif meta.get("r_pos") is not None:
+            label += f" R-pos={float(meta['r_pos']):.1f}"
 
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 2)
-        ty = max(0, y1 - 7)
-        cv2.putText(out, label, (x1, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(out, label, (x1, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2, cv2.LINE_AA)
+        color = _vehicle_color_bgr(cls_name)
+        _draw_box_and_label(out, x1, y1, x2, y2, label, color)
 
     return out
 
-
 def write_csv_distance(path: str, image_path: str, dets: List[Dict[str, Any]], device_used: str, timings_ms: Dict[str, Any]) -> None:
-    header = "filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,distance_m,device,inference_ms,total_ms\n"
+    header = "filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,distance_m,brightness,device,inference_ms,total_ms\n"
     base = os.path.basename(image_path)
 
     inf_ms = int((timings_ms or {}).get("inference", 0))
     tot_ms = int((timings_ms or {}).get("total", 0))
+    brightness = _estimate_brightness_from_path(image_path)
 
     lines = [header]
     for i, d in enumerate(dets, start=1):
@@ -749,21 +818,22 @@ def write_csv_distance(path: str, image_path: str, dets: List[Dict[str, Any]], d
         bw = max(0, x2 - x1)
         bh = max(0, y2 - y1)
 
-        cls_name = str(d.get("cls_name", ""))
+        cls_name = _normalized_vehicle_class(d.get("cls_name", "vehicle"))
         conf = float(d.get("conf", 0.0))
 
         meta = d.get("meta", {}) or {}
         dist = ""
-        if "distance_m" in meta and meta["distance_m"] is not None:
+        if meta.get("distance_m") is not None:
             dist = f"{float(meta['distance_m']):.6f}"
+        elif meta.get("dist_m") is not None:
+            dist = f"{float(meta['dist_m']):.6f}"
 
         lines.append(
-            f"{base},{i},{cls_name},{x1},{y1},{x2},{y2},{bw},{bh},{conf:.6f},{dist},{device_used},{inf_ms},{tot_ms}\n"
+            f"{base},{i},{cls_name},{x1},{y1},{x2},{y2},{bw},{bh},{conf:.6f},{dist},{brightness},{device_used},{inf_ms},{tot_ms}\n"
         )
 
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
-
 
 # ----------------------------
 # Full pipeline run

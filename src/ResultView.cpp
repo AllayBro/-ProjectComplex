@@ -33,6 +33,9 @@
 #include <QUuid>
 #include <QUrl>
 
+#include <algorithm>
+#include <cmath>
+
 #ifdef VK_WITH_QXLSX
 #include <QXlsx/xlsxdocument.h>
 #include <QXlsx/xlsxformat.h>
@@ -1055,7 +1058,6 @@ void ResultView::rebuildDetectionsTable() {
 
     m_tblDetections->setSortingEnabled(true);
 }
-
 void ResultView::renderResultPixmap() {
     m_srcResult = QPixmap();
     if (m_srcOriginal.isNull()) return;
@@ -1064,39 +1066,141 @@ void ResultView::renderResultPixmap() {
     QImage img = m_srcOriginal.toImage().convertToFormat(QImage::Format_ARGB32);
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
 
-    QPen pen(QColor(0, 255, 0));
-    pen.setWidth(2);
-    p.setPen(pen);
+    const auto clampi = [](int v, int lo, int hi) -> int {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    };
 
-    QFont f = p.font();
-    f.setPointSize(10);
-    f.setBold(true);
-    p.setFont(f);
+    const auto colorForCls = [&](const QString& clsName) -> QColor {
+        const QString c = clsName.trimmed().toLower();
+        if (c == "truck") return QColor(255, 0, 0);
+        if (c == "bus") return QColor(0, 0, 255);
+        if (c == "motorcycle") return QColor(0, 0, 0);
+        return QColor(0, 255, 0);
+    };
+
+    double scale = 1.0;
+    scale = qMax(scale, double(img.width()) / 1024.0);
+    scale = qMax(scale, double(img.height()) / 576.0);
+
+    const int boxThickness = clampi(qRound(2.0 * scale), 2, 6);
+    const int fontPx = clampi(qRound(12.0 * scale), 12, 42);
+    const int outlinePx = clampi(qRound(2.0 * scale), 1, 4);
+    const int gapPx = clampi(qRound(6.0 * scale), 6, 18);
+
+    QFont font = p.font();
+    font.setBold(true);
+    font.setPixelSize(fontPx);
+    p.setFont(font);
+
+    QFontMetrics fm(font);
+    QList<QRect> usedLabels;
 
     for (int i = 0; i < m_lastResult.detections.size(); ++i) {
         const auto& d = m_lastResult.detections[i];
 
-        QRect r(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
-        p.drawRect(r);
+        const int x1 = clampi(d.x1, 0, img.width() - 1);
+        const int y1 = clampi(d.y1, 0, img.height() - 1);
+        const int x2 = clampi(d.x2, 0, img.width() - 1);
+        const int y2 = clampi(d.y2, 0, img.height() - 1);
 
-        QString label = QString("%1 %2").arg(d.clsName).arg(i + 1);
+        if (x2 <= x1 || y2 <= y1) continue;
 
-        // если есть dist_m — добавим
-        if (d.meta.contains("dist_m")) {
+        const QRect boxRect(x1, y1, x2 - x1, y2 - y1);
+
+        QPen pen(colorForCls(d.clsName));
+        pen.setWidth(boxThickness);
+        p.setPen(pen);
+        p.drawRect(boxRect);
+
+        QString label = QString("%1 %2").arg(d.clsName.trimmed()).arg(i + 1);
+
+        if (d.meta.contains("distance_m")) {
+            label += " ~" + QString::number(d.meta.value("distance_m").toDouble(), 'f', 2) + "m";
+        } else if (d.meta.contains("dist_m")) {
             label += " ~" + QString::number(d.meta.value("dist_m").toDouble(), 'f', 2) + "m";
+        } else if (d.meta.contains("r_pos")) {
+            label += " R-pos=" + QString::number(d.meta.value("r_pos").toDouble(), 'f', 1);
         }
 
-        const int tx = r.left();
-        const int ty = std::max(12, r.top() - 4);
-        p.drawText(tx, ty, label);
+        const int textW = fm.horizontalAdvance(label);
+        const int textH = fm.height();
+
+        auto intersectsUsed = [&](const QRect& rc) -> bool {
+            for (const QRect& u : usedLabels) {
+                if (u.intersects(rc)) return true;
+            }
+            return false;
+        };
+
+        auto tryPlace = [&](int prefLeft, int prefTop, bool moveDown) -> QRect {
+            const int maxLeft = qMax(0, img.width() - textW - 1);
+            const int maxTop = qMax(0, img.height() - textH - 1);
+
+            int left = clampi(prefLeft, 0, maxLeft);
+            int top = clampi(prefTop, 0, maxTop);
+
+            QRect rc(left, top, textW, textH);
+
+            for (int step = 0; step < 60; ++step) {
+                if (!rc.intersects(boxRect) && !intersectsUsed(rc.adjusted(-2, -2, 2, 2))) {
+                    return rc;
+                }
+
+                if (moveDown) top += textH + 2;
+                else top -= textH + 2;
+
+                if (top < 0 || top > maxTop) break;
+                rc.moveTop(top);
+            }
+
+            return QRect();
+        };
+
+        QRect textRect;
+
+        textRect = tryPlace(boxRect.left(), boxRect.top() - textH - gapPx, false);
+        if (textRect.isNull()) {
+            textRect = tryPlace(boxRect.left(), boxRect.bottom() + gapPx, true);
+        }
+        if (textRect.isNull()) {
+            textRect = tryPlace(boxRect.right() - textW, boxRect.top() - textH - gapPx, false);
+        }
+        if (textRect.isNull()) {
+            textRect = tryPlace(boxRect.right() - textW, boxRect.bottom() + gapPx, true);
+        }
+        if (textRect.isNull()) {
+            const int left = clampi(boxRect.left(), 0, qMax(0, img.width() - textW - 1));
+            const int top = clampi(boxRect.top() - textH - gapPx, 0, qMax(0, img.height() - textH - 1));
+            textRect = QRect(left, top, textW, textH);
+        }
+
+        usedLabels.push_back(textRect.adjusted(-2, -2, 2, 2));
+
+        const QPoint textPos(textRect.left(), textRect.top() + fm.ascent());
+
+        p.setPen(Qt::black);
+        for (int oy = -outlinePx; oy <= outlinePx; ++oy) {
+            for (int ox = -outlinePx; ox <= outlinePx; ++ox) {
+                if (ox == 0 && oy == 0) continue;
+                p.drawText(textPos + QPoint(ox, oy), label);
+            }
+        }
+
+        p.setPen(Qt::white);
+        p.drawText(textPos, label);
     }
 
     p.end();
+
     QPixmap pm = QPixmap::fromImage(img);
     pm.setDevicePixelRatio(1.0);
     m_srcResult = pm;
     m_srcResult.setDevicePixelRatio(1.0);
+
     setDragPayloadOnLabel(
         m_imgResult,
         m_srcResult,

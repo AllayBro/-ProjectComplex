@@ -32,16 +32,13 @@
   <component name="ChangeListManager">
     <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="23.03 - v0.6.3 - Fix bug cluster mashine">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/objects_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/objects_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/prototypes/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/prototypes/api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RunnerClient.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/RunnerClient.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -199,6 +196,11 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="traffic" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="traffic" CONFIG_NAME="Release" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="traffic">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -276,7 +278,8 @@
       <workItem from="1773911992065" duration="2191000" />
       <workItem from="1773923049611" duration="24079000" />
       <workItem from="1774247748493" duration="7634000" />
-      <workItem from="1774258512871" duration="662000" />
+      <workItem from="1774258512871" duration="8373000" />
+      <workItem from="1774267942788" duration="4667000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -558,7 +561,23 @@
       <option name="project" value="LOCAL" />
       <updated>1774247804685</updated>
     </task>
-    <option name="localTasksCounter" value="36" />
+    <task id="LOCAL-00036" summary="23.03 - v0.6.3 - Fix bug cluster mashine">
+      <option name="closed" value="true" />
+      <created>1774259208126</created>
+      <option name="number" value="00036" />
+      <option name="presentableId" value="LOCAL-00036" />
+      <option name="project" value="LOCAL" />
+      <updated>1774259208126</updated>
+    </task>
+    <task id="LOCAL-00037" summary="23.03 - v0.6.3 - Fix bug cluster mashine">
+      <option name="closed" value="true" />
+      <created>1774268376648</created>
+      <option name="number" value="00037" />
+      <option name="presentableId" value="LOCAL-00037" />
+      <option name="project" value="LOCAL" />
+      <updated>1774268376648</updated>
+    </task>
+    <option name="localTasksCounter" value="38" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -599,7 +618,8 @@
     <MESSAGE value="04.03 - v0.5.3 - Fix CI/CD" />
     <MESSAGE value="19.03 - v0.6.1 - Fix CI/CD" />
     <MESSAGE value="19.03 - v0.6.2 - Add full vehicle auto" />
-    <option name="LAST_COMMIT_MESSAGE" value="19.03 - v0.6.2 - Add full vehicle auto" />
+    <MESSAGE value="23.03 - v0.6.3 - Fix bug cluster mashine" />
+    <option name="LAST_COMMIT_MESSAGE" value="23.03 - v0.6.3 - Fix bug cluster mashine" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

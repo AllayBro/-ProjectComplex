@@ -53,6 +53,68 @@ except Exception:
 
 CAR_CLASSES = {2, 3, 5, 7}
 ROT_KEEP_IDS = None
+CLS_ID_TO_NAME = {
+    2: "car",
+    3: "motorcycle",
+    5: "bus",
+    7: "truck",
+}
+
+
+def _normalized_vehicle_class(cls_name):
+    cls = str(cls_name or "").strip().lower()
+    if cls == "van":
+        return "car"
+    return cls
+
+
+def _cls_name_from_id(cls_id):
+    return _normalized_vehicle_class(CLS_ID_TO_NAME.get(int(cls_id), str(int(cls_id))))
+
+
+def _vehicle_color_bgr(cls_name):
+    cls = _normalized_vehicle_class(cls_name)
+    if cls == "truck":
+        return (0, 0, 255)
+    if cls == "bus":
+        return (255, 0, 0)
+    if cls == "motorcycle":
+        return (0, 0, 0)
+    return (0, 255, 0)
+
+
+def _draw_box_and_label(img, x1, y1, x2, y2, label, color):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8
+    box_thickness = 2
+    text_thickness = 2
+    outline_thickness = 5
+    pad_x = 8
+    pad_y = 6
+
+    cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, box_thickness)
+
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, text_thickness)
+    tx = max(0, int(x1))
+    ty = max(th + pad_y, int(y1) - 10)
+
+    bg_x1 = tx
+    bg_y1 = max(0, ty - th - pad_y)
+    bg_x2 = min(img.shape[1] - 1, tx + tw + pad_x * 2)
+    bg_y2 = min(img.shape[0] - 1, ty + baseline + pad_y)
+
+    cv2.rectangle(img, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (0, 0, 0), outline_thickness, cv2.LINE_AA)
+    cv2.putText(img, label, (tx + pad_x, ty), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
+
+def _box_cls_id(box):
+    if len(box) > 5:
+        try:
+            return int(box[5])
+        except Exception:
+            return None
+    return None
 
 # Чтение любого изображения (JPEG/PNG/HEIC)
 def read_image_auto(file_bytes: bytes):
@@ -181,9 +243,18 @@ def iou_xyxy(a, b):
 
 def nms_union(boxes, thr=0.55):
     boxes = sorted(boxes, key=lambda x: x[4], reverse=True)
-    kept=[]
+    kept = []
     for b in boxes:
-        if all(iou_xyxy(b[:4], k[:4]) <= thr for k in kept):
+        drop = False
+        for k in kept:
+            cls_b = _box_cls_id(b)
+            cls_k = _box_cls_id(k)
+            if cls_b is not None and cls_k is not None and cls_b != cls_k:
+                continue
+            if iou_xyxy(b[:4], k[:4]) > thr:
+                drop = True
+                break
+        if not drop:
             kept.append(b)
     return kept
 
@@ -233,19 +304,29 @@ def _vk_merge_parts_union(boxes,
             parent[rb] = ra
 
     P = []
-    for (x1, y1, x2, y2, c) in boxes:
-        x1f = float(x1); y1f = float(y1); x2f = float(x2); y2f = float(y2)
+    for box in boxes:
+        x1, y1, x2, y2, c = box[:5]
+        tail = tuple(box[5:])
+        x1f = float(x1)
+        y1f = float(y1)
+        x2f = float(x2)
+        y2f = float(y2)
         w = max(1.0, x2f - x1f)
         h = max(1.0, y2f - y1f)
         cx = 0.5 * (x1f + x2f)
         cy = 0.5 * (y1f + y2f)
-        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy))
+        P.append((x1f, y1f, x2f, y2f, float(c), w, h, cx, cy, tail))
 
     for i in range(n):
-        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi = P[i]
-        for j in range(i + 1, n):
-            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj = P[j]
+        x1i, y1i, x2i, y2i, ci, wi, hi, cxi, cyi, tail_i = P[i]
+        cls_i = tail_i[0] if len(tail_i) > 0 else None
 
+        for j in range(i + 1, n):
+            x1j, y1j, x2j, y2j, cj, wj, hj, cxj, cyj, tail_j = P[j]
+            cls_j = tail_j[0] if len(tail_j) > 0 else None
+
+            if cls_i is not None and cls_j is not None and cls_i != cls_j:
+                continue
             if abs(cxi - cxj) > float(center_frac) * max(wi, wj):
                 continue
             if abs(cyi - cyj) > float(center_frac) * max(hi, hj):
@@ -284,9 +365,13 @@ def _vk_merge_parts_union(boxes,
         y1 = min(P[k][1] for k in comp)
         x2 = max(P[k][2] for k in comp)
         y2 = max(P[k][3] for k in comp)
-        c = max(P[k][4] for k in comp)
+
+        best_k = max(comp, key=lambda k: P[k][4])
+        c = P[best_k][4]
+        tail = P[best_k][9]
+
         if x2 > x1 and y2 > y1:
-            merged.append((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(c)))
+            merged.append((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(c), *tail))
 
     merged.sort(key=lambda t: t[4], reverse=True)
     return merged
@@ -423,24 +508,21 @@ def bbox_rotate_k90(bbox_xyxy, W: int, H: int, k: int):
     return [int(round(min(xs))), int(round(min(ys))), int(round(max(xs))), int(round(max(ys)))], nW, nH
 
 def rotate_boxes_k90_back(boxes_rot, W_base, H_base, k_applied):
-    """
-    boxes_rot заданы в координатах изображения, полученного поворотом base на k_applied*90 (CW).
-    Возвращает боксы в координатах base.
-    """
     k = int(k_applied) % 4
     if k == 0:
         return boxes_rot
 
-    # размеры изображения после поворота base на k
     Wr, Hr = (W_base, H_base) if (k % 2 == 0) else (H_base, W_base)
     k_inv = (-k) % 4
 
     out = []
-    for (x1, y1, x2, y2, conf) in boxes_rot:
+    for box in boxes_rot:
+        x1, y1, x2, y2, conf = box[:5]
+        tail = tuple(box[5:])
+
         bb0, _, _ = bbox_rotate_k90([x1, y1, x2, y2], Wr, Hr, k_inv)
         X1, Y1, X2, Y2 = bb0
 
-        # зажим в границы base
         X1 = max(0, min(int(X1), W_base - 1))
         X2 = max(0, min(int(X2), W_base - 1))
         Y1 = max(0, min(int(Y1), H_base - 1))
@@ -449,7 +531,7 @@ def rotate_boxes_k90_back(boxes_rot, W_base, H_base, k_applied):
         if (X2 - X1) < 2 or (Y2 - Y1) < 2:
             continue
 
-        out.append((X1, Y1, X2, Y2, float(conf)))
+        out.append((X1, Y1, X2, Y2, float(conf), *tail))
     return out
 
 def _rotate_bound(img_bgr: np.ndarray, angle_deg: float):
@@ -491,23 +573,24 @@ def _apply_affine_to_points(M2x3: np.ndarray, pts_xy: np.ndarray):
     return out
 
 def _map_boxes_from_rotated_to_base(boxes_rot, M_base_to_rot, W_base, H_base):
-    """
-    boxes_rot: list[(x1,y1,x2,y2,conf)] в координатах rotated
-    Возвращает боксы в координатах base (исходного img_bgr) как axis-aligned bbox.
-    """
     if not boxes_rot:
         return []
 
     Minv = cv2.invertAffineTransform(np.asarray(M_base_to_rot, dtype=np.float32))
     out = []
-    for (x1,y1,x2,y2,conf) in boxes_rot:
-        pts = np.array([[x1,y1],[x2,y1],[x2,y2],[x1,y2]], dtype=np.float32)
-        pts0 = _apply_affine_to_points(Minv, pts)
-        xs = pts0[:,0]; ys = pts0[:,1]
-        xx1 = int(np.floor(xs.min())); yy1 = int(np.floor(ys.min()))
-        xx2 = int(np.ceil(xs.max()));  yy2 = int(np.ceil(ys.max()))
+    for box in boxes_rot:
+        x1, y1, x2, y2, conf = box[:5]
+        tail = tuple(box[5:])
 
-        # зажать в границы base
+        pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32)
+        pts0 = _apply_affine_to_points(Minv, pts)
+        xs = pts0[:, 0]
+        ys = pts0[:, 1]
+        xx1 = int(np.floor(xs.min()))
+        yy1 = int(np.floor(ys.min()))
+        xx2 = int(np.ceil(xs.max()))
+        yy2 = int(np.ceil(ys.max()))
+
         xx1 = max(0, min(xx1, W_base - 1))
         yy1 = max(0, min(yy1, H_base - 1))
         xx2 = max(0, min(xx2, W_base - 1))
@@ -515,7 +598,8 @@ def _map_boxes_from_rotated_to_base(boxes_rot, M_base_to_rot, W_base, H_base):
 
         if (xx2 - xx1) < 3 or (yy2 - yy1) < 3:
             continue
-        out.append((xx1, yy1, xx2, yy2, float(conf)))
+
+        out.append((xx1, yy1, xx2, yy2, float(conf), *tail))
     return out
 
 def _map_bbox_from_base_to_rotated(bbox_xyxy, M_base_to_rot, W_rot, H_rot):
@@ -593,6 +677,10 @@ def _run_yolo_cars(im_bgr, conf, iou, imgsz, max_det, tta=False):
 
     r = yolo(im_bgr, **kwargs)[0]
     boxes = []
+    names = getattr(r, "names", None)
+    if not names:
+        names = getattr(getattr(yolo, "model", None), "names", {}) or {}
+
     for b in r.boxes:
         cls_id = int(b.cls.item())
 
@@ -603,8 +691,11 @@ def _run_yolo_cars(im_bgr, conf, iou, imgsz, max_det, tta=False):
             if cls_id not in CAR_CLASSES:
                 continue
 
+        cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
+        cls_name = _normalized_vehicle_class(cls_name)
+
         x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-        boxes.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item())))
+        boxes.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item()), int(cls_id), str(cls_name)))
 
     return boxes
 
@@ -860,29 +951,30 @@ def canonicalize_orientation(img_bgr: np.ndarray):
 
 # идея: 1 машина = 1 бокс
 def _containment_suppression(boxes, contain_thr=0.92, conf_margin=0.02):
-    """
-    Удаляет бокс B, если он почти полностью внутри A и A не слабее по conf.
-    contain_thr: доля площади B, покрытая пересечением с A.
-    """
     if not boxes:
         return []
 
-    # сортировка по уверенности убыв.
     bxs = sorted(boxes, key=lambda x: x[4], reverse=True)
     keep = []
     for b in bxs:
-        x1,y1,x2,y2,cb = b
-        area_b = max(0, x2-x1) * max(0, y2-y1)
+        x1, y1, x2, y2, cb = b[:5]
+        area_b = max(0, x2 - x1) * max(0, y2 - y1)
         if area_b <= 0:
             continue
 
+        cls_b = _box_cls_id(b)
         drop = False
+
         for a in keep:
-            ax1,ay1,ax2,ay2,ca = a
-            ix1, iy1 = max(x1,ax1), max(y1,ay1)
-            ix2, iy2 = min(x2,ax2), min(y2,ay2)
-            iw, ih = max(0, ix2-ix1), max(0, iy2-iy1)
-            inter = iw*ih
+            cls_a = _box_cls_id(a)
+            if cls_a is not None and cls_b is not None and cls_a != cls_b:
+                continue
+
+            ax1, ay1, ax2, ay2, ca = a[:5]
+            ix1, iy1 = max(x1, ax1), max(y1, ay1)
+            ix2, iy2 = min(x2, ax2), min(y2, ay2)
+            iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+            inter = iw * ih
             if inter <= 0:
                 continue
 
@@ -893,7 +985,9 @@ def _containment_suppression(boxes, contain_thr=0.92, conf_margin=0.02):
 
         if not drop:
             keep.append(b)
+
     return keep
+
 def _box_area(b):
     return max(0, int(b[2]) - int(b[0])) * max(0, int(b[3]) - int(b[1]))
 
@@ -1092,8 +1186,10 @@ def _run_yolo_cars_tiled(im_bgr, conf, iou, imgsz, max_det, tta, tile, overlap):
             x2 = min(x + t, W)
             crop = im_bgr[y:y2, x:x2]
             boxes = _run_yolo_cars(crop, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det, tta=tta)
-            for (x1, y1, x3, y3, c) in boxes:
-                out.append((int(x1 + x), int(y1 + y), int(x3 + x), int(y3 + y), float(c)))
+            for box in boxes:
+                x1, y1, x3, y3, c = box[:5]
+                tail = tuple(box[5:])
+                out.append((int(x1 + x), int(y1 + y), int(x3 + x), int(y3 + y), float(c), *tail))
             x += step
         y += step
     return out
@@ -1650,7 +1746,10 @@ def process_image(img_bgr):
     vis = img_bgr.copy()
     results = []
 
-    for i, (x1, y1, x2, y2, conf) in enumerate(boxes, 1):
+    for i, box in enumerate(boxes, 1):
+        x1, y1, x2, y2, conf = box[:5]
+        cls_id = int(box[5]) if len(box) > 5 else 2
+        cls_name = _normalized_vehicle_class(box[6] if len(box) > 6 else _cls_name_from_id(cls_id))
         bb_w = _map_bbox_from_base_to_rotated((x1, y1, x2, y2), tf["M"], W, H) if tf is not None else (x1, y1, x2, y2)
         if bb_w is None:
             continue
@@ -1768,20 +1867,15 @@ def process_image(img_bgr):
                     roll = 0.0
 
         # Отрисовка на исходном кадре
-        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        color = _vehicle_color_bgr(cls_name)
 
-        label = f"#{i}"
+        label = f"{cls_name} {i}"
         if inpl is not None:
-            label += f" Rpos={inpl:.1f}"
-        label += f" Rimg={r_img_deg}"
-        if yaw is not None:
-            # Blender Transform -> Rotation (XYZ Euler), градусы
-            label += f" RotX={pitch:.1f} RotY={roll:.1f} RotZ={yaw:.1f}"
+            label += f" R-pos={inpl:.1f}"
+        elif r_img_deg is not None:
+            label += f" R-img={float(r_img_deg):.1f}"
 
-
-        cv2.putText(vis, label, (x1, max(0, y1 - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
-
+        _draw_box_and_label(vis, x1, y1, x2, y2, label, color)
         to_rad = math.radians
         sin_yaw, cos_yaw = (math.sin(to_rad(yaw)), math.cos(to_rad(yaw))) if yaw is not None else (None, None)
         sin_pitch, cos_pitch = (math.sin(to_rad(pitch)), math.cos(to_rad(pitch))) if pitch is not None else (None, None)
@@ -1791,43 +1885,27 @@ def process_image(img_bgr):
             "id": i,
             "bbox": [int(x1), int(y1), int(x2), int(y2)],
             "conf": round(float(conf), 3),
+            "cls_id": int(cls_id),
+            "cls_name": str(cls_name),
 
-            # Как у тебя было (оставляю совместимость с текущим форматом)
             "X-pos": None if yaw is None else round(float(yaw), 3),
             "Y-pos": None if pitch is None else round(float(pitch), 3),
             "Z-pos": None if roll is None else round(float(roll), 3),
 
-            # Точное положение (позиция) — отдельными полями.
-            # ВАЖНО: если у тебя реально есть источник 3D-позиции — подставь его вместо None ниже.
             "Pos-X": None,
             "Pos-Y": None,
             "Pos-Z": None,
 
-            # Твой угол машины в плоскости кадра (как и был)
             "R-pos": None if inpl is None else round(float(inpl), 3),
 
-            # Rotation для Blender (Transform -> Rotation, Mode: XYZ Euler), градусы
-            # Принято: RotX=pitch, RotY=roll, RotZ=yaw
             "Rot-X": None if pitch is None else round(float(pitch), 3),
             "Rot-Y": None if roll is None else round(float(roll), 3),
             "Rot-Z": None if yaw is None else round(float(yaw), 3),
 
             "pose_src": pose_src,
-            "sin_yaw": None if sin_yaw is None else round(float(sin_yaw), 6),
-            "cos_yaw": None if cos_yaw is None else round(float(cos_yaw), 6),
-            "sin_pitch": None if sin_pitch is None else round(float(sin_pitch), 6),
-            "cos_pitch": None if cos_pitch is None else round(float(cos_pitch), 6),
-            "sin_roll": None if sin_roll is None else round(float(sin_roll), 6),
-            "cos_roll": None if cos_roll is None else round(float(cos_roll), 6),
-
-            # Поворот исходного фото (0/90/180/270)
-            "R-img": r_img_deg,
+            "R-img": None if r_img_deg is None else round(float(r_img_deg), 3),
         })
     return vis, results
-
-# ПОЧЕМУ ТЫ С РАЗНЫМИ ФОТОГРАФИЯМИ НЕ РАБОТАЕШЬ, А ТОЛЬКО С КОНКРЕТНЫМИ? Почему сканирует 1 машину при 100?
-
-
 # Глобально: храним последнюю загрузку и декодированные картинки
 UPLOADED_BYTES = {}
 UPLOADED_IMAGES = {}
@@ -1976,6 +2054,8 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     cv2.imwrite(annotated_path, vis)
 
     dets = []
+    brightness = round(float(np.mean(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))), 2)
+
     for r in (rows or []):
         bb = r.get("bbox", None)
         if not bb or len(bb) != 4:
@@ -1983,11 +2063,15 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
         x1, y1, x2, y2 = map(int, bb)
         conf = r.get("conf", 0.0)
+        cls_id = int(r.get("cls_id", 2))
+        cls_name = _normalized_vehicle_class(r.get("cls_name", _cls_name_from_id(cls_id)))
 
         meta = dict(r)
         meta.pop("bbox", None)
         meta.pop("id", None)
         meta.pop("conf", None)
+        meta.pop("cls_id", None)
+        meta.pop("cls_name", None)
 
         for k, v in list(meta.items()):
             if isinstance(v, (np.integer,)):
@@ -1995,13 +2079,26 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             elif isinstance(v, (np.floating,)):
                 meta[k] = float(v)
 
+        meta["brightness"] = float(brightness)
+
         dets.append({
             "bbox_xyxy": [x1, y1, x2, y2],
             "conf": float(conf) if conf is not None else 0.0,
-            "cls_id": 2,
-            "cls_name": "car",
+            "cls_id": int(cls_id),
+            "cls_name": str(cls_name),
             "meta": meta
         })
+
+    csv_path = os.path.abspath(os.path.join(out_dir, "cluster_2_results.csv"))
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,r_pos,brightness\n")
+        for i, d in enumerate(dets, start=1):
+            x1, y1, x2, y2 = d["bbox_xyxy"]
+            meta = d.get("meta", {}) or {}
+            f.write(
+                f"{os.path.basename(image_path)},{i},{d['cls_name']},{x1},{y1},{x2},{y2},"
+                f"{int(x2 - x1)},{int(y2 - y1)},{float(d['conf']):.6f},{meta.get('R-pos', '')},{brightness}\n"
+            )
 
     total_ms = int(round((time.time() - t0) * 1000))
 
@@ -2013,7 +2110,10 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         "warnings": warnings,
         "annotated_image_path": annotated_path,
         "cleaned_image_path": "",
-        "artifacts": {},
+        "artifacts": {
+            "csv_path": csv_path,
+            "brightness": brightness,
+        },
         "timings_ms": {"total": total_ms, "preprocess": 0, "inference": 0, "postprocess": 0},
         "detections": dets
     }
