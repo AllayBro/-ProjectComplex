@@ -303,11 +303,10 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
 
     connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString&) {
     const QString p = currentYoloModelPath();
-    if (!p.isEmpty()) {
-        QSettings s(uiIniPathClusters(), QSettings::IniFormat);
-        s.setValue("ui/last_yolo_model_path", p);
-        s.sync();
-    }
+    if (p.isEmpty()) return;
+
+    rememberYoloModelPath(p);
+    emit yoloModelChanged(p);
 });
 
     connect(m_input, &QLineEdit::textChanged, this, [this](const QString& t) {
@@ -368,8 +367,8 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
             selectYoloInCombo(m_yoloModel, imported);
         }
 
-        s.setValue("ui/last_yolo_model_path", imported);
-        s.sync();
+        rememberYoloModelPath(imported);
+        emit yoloModelChanged(imported);
     });
 
     for (int i = 0; i < m_clusterButtons.size(); ++i) {
@@ -475,6 +474,29 @@ QString ClustersTab::currentYoloModelPath() const {
     }
 
     return QDir::cleanPath(fi.absoluteFilePath());
+}
+
+void ClustersTab::rememberYoloModelPath(const QString& absPath) {
+    const QString p = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+    if (p.isEmpty()) return;
+
+    QSettings s(uiIniPathClusters(), QSettings::IniFormat);
+    s.setValue("ui/last_yolo_model_path", p);
+    s.sync();
+}
+
+void ClustersTab::setYoloModelPath(const QString& absPath) {
+    const QString p = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+    if (p.isEmpty()) return;
+
+    reloadYoloModels();
+
+    if (m_yoloModel) {
+        QSignalBlocker b(m_yoloModel);
+        selectYoloInCombo(m_yoloModel, p);
+    }
+
+    rememberYoloModelPath(p);
 }
 
 static QString absPathLocal(const QString& appDir, const QString& relOrAbs) {

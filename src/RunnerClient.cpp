@@ -310,14 +310,28 @@ void RunnerClient::startProcess(const QStringList& args) {
     m_runLog.close();
     m_runLogPath.clear();
 
-    // Важно для Windows: если pythonExe задан как "python" (без пути),
-    // то absPath(appDir, "python") ошибочно указывает на папку "python/" рядом с приложением.
     QString pyExe = m_cfg.pythonExe.trimmed();
     if (pyExe.isEmpty()) pyExe = "python";
+
     const bool hasDirSep = pyExe.contains('/') || pyExe.contains('\\');
     if (QFileInfo(pyExe).isAbsolute() || hasDirSep) {
         pyExe = absPath(m_appDir, pyExe);
     }
+
+    const QFileInfo pyFi(pyExe);
+    if ((pyFi.isAbsolute() || hasDirSep) && (!pyFi.exists() || !pyFi.isFile())) {
+        emit finishedError("Внутренний модуль Python не найден. Пакет приложения собран неполностью: " + pyExe);
+        return;
+    }
+
+    if (!runnerPath.isEmpty()) {
+        const QFileInfo runnerFi(runnerPath);
+        if (!runnerFi.exists() || !runnerFi.isFile()) {
+            emit finishedError("Файл runner.py не найден в пакете приложения: " + runnerPath);
+            return;
+        }
+    }
+
     m_proc->setProgram(pyExe);
 
     QStringList fullArgs;
@@ -353,9 +367,9 @@ void RunnerClient::startProcess(const QStringList& args) {
         }
         env.insert("PYTHONPATH", pp.join(sep));
         // PYTHONHOME корректно задавать только если известен реальный путь к python.exe
-        const QFileInfo pyFi(pyExe);
-        if (pyFi.isAbsolute() && pyFi.exists() && pyFi.isFile()) {
-            env.insert("PYTHONHOME", QDir::toNativeSeparators(pyFi.absolutePath()));
+        const QFileInfo pyHomeFi(pyExe);
+        if (pyHomeFi.isAbsolute() && pyHomeFi.exists() && pyHomeFi.isFile()) {
+            env.insert("PYTHONHOME", QDir::toNativeSeparators(pyHomeFi.absolutePath()));
         }
         m_proc->setProcessEnvironment(env);
     }

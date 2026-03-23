@@ -8,6 +8,7 @@
 #include <QJsonParseError>
 #include <QJsonArray>
 #include <QStandardPaths>
+#include <QStringList>
 
 QString AppConfig::readAllText(const QString& path) {
     QFile f(path);
@@ -36,6 +37,42 @@ static QString defaultMapCacheDir() {
     return d.filePath("map_cache");
 }
 
+
+static bool isWindowsStorePythonAlias(const QString& path) {
+#ifdef Q_OS_WIN
+    const QString p = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()).toLower();
+    return p.contains("/appdata/local/microsoft/windowsapps/");
+#else
+    Q_UNUSED(path);
+    return false;
+#endif
+}
+
+static QString findBundledPython(const QString& appDirPath) {
+#ifdef Q_OS_WIN
+    const QStringList candidates = {
+        "py/traffic_py.exe",
+        "py/pythonw.exe",
+        "py/python.exe"
+    };
+#else
+    const QStringList candidates = {
+        "py/bin/python3",
+        "py/bin/python"
+    };
+#endif
+
+    for (const QString& rel : candidates) {
+        const QString abs = QDir(appDirPath).filePath(rel);
+        const QFileInfo fi(abs);
+        if (fi.exists() && fi.isFile()) {
+            return QDir::cleanPath(fi.absoluteFilePath());
+        }
+    }
+
+    return {};
+}
+
 AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
     AppConfig cfg;
 
@@ -45,12 +82,19 @@ AppConfig AppConfig::loadOrDie(const QString& appDirPath) {
     cfg.pythonExe = o.value("python_exe").toString("python").trimmed();
     if (cfg.pythonExe.isEmpty()) cfg.pythonExe = "python";
 
-    // Если указано просто "python", пытаемся найти полный путь к исполняемому файлу,
-    // чтобы избежать конфликта с папкой "python/" в директории приложения на Windows.
-    if (cfg.pythonExe == "python") {
-        QString found = QStandardPaths::findExecutable("python");
-        if (!found.isEmpty()) {
-            cfg.pythonExe = found;
+    const QString pyKey = cfg.pythonExe.toLower();
+    if (pyKey == "python" || pyKey == "python.exe") {
+        const QString bundledPython = findBundledPython(appDirPath);
+        if (!bundledPython.isEmpty()) {
+            cfg.pythonExe = bundledPython;
+        } else {
+            QString found = QStandardPaths::findExecutable("python");
+            if (isWindowsStorePythonAlias(found)) {
+                found.clear();
+            }
+            if (!found.isEmpty()) {
+                cfg.pythonExe = QDir::cleanPath(QFileInfo(found).absoluteFilePath());
+            }
         }
     }
 

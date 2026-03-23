@@ -46,7 +46,7 @@ void MainWindow::setupUi() {
 
     if (m_reg) m_tabs->addTab(m_reg, "Регрессия");
     m_tabs->addTab(m_map, "Карта");
-    m_tabs->addTab(m_clusters, "Кластеры (4)");
+    m_tabs->addTab(m_clusters, "Режим кластеров");
     m_tabs->addTab(m_full, "Полный режим расстояния");
 
     step(96, "Интерфейс: готово");
@@ -58,4 +58,7 @@ void MainWindow::bindSignals() {
 
     connect(m_full, &FullDistanceTab::imageSelected, m_map, &MapTab::onImageSelected);
     connect(m_full, &FullDistanceTab::resultReady,   m_map, &MapTab::onResultReady);
+
+    connect(m_clusters, &ClustersTab::yoloModelChanged, m_full, &FullDistanceTab::setYoloModelPath);
+    connect(m_full, &FullDistanceTab::yoloModelChanged, m_clusters, &ClustersTab::setYoloModelPath);
 }

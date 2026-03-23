@@ -24,11 +24,213 @@
 #include <QStandardPaths>
 #include <QImageWriter>
 #include <QRegularExpression>
+#include <QApplication>
+#include <QClipboard>
+#include <QKeyEvent>
+#include <QDrag>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QUuid>
+#include <QUrl>
 
 #ifdef VK_WITH_QXLSX
 #include <QXlsx/xlsxdocument.h>
 #include <QXlsx/xlsxformat.h>
 #endif
+
+static QString dragCacheRoot() {
+    QString root = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (root.isEmpty()) root = QDir::tempPath();
+    if (root.isEmpty()) root = QDir::homePath();
+
+    const QString dirPath = QDir(root).filePath("traffic_drag");
+    QDir().mkpath(dirPath);
+    return dirPath;
+}
+
+static QString ensureCachedDragPng(const QString& cacheKey, const QPixmap& pm) {
+    if (pm.isNull()) return {};
+
+    const QString safeKey = cacheKey.trimmed().isEmpty()
+        ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+        : cacheKey;
+
+    const QString filePath = QDir(dragCacheRoot()).filePath("drag_" + safeKey + ".png");
+
+    if (QFileInfo::exists(filePath) && QFileInfo(filePath).isFile()) {
+        return filePath;
+    }
+
+    if (!pm.save(filePath, "PNG")) {
+        return {};
+    }
+
+    return filePath;
+}
+
+static QString tableItemText(const QTableWidget* t, int row, int col) {
+    if (!t) return {};
+    QTableWidgetItem* it = t->item(row, col);
+    return it ? it->text() : QString();
+}
+
+static QString tableHeaderText(const QTableWidget* t, int col) {
+    if (!t) return {};
+    QTableWidgetItem* it = t->horizontalHeaderItem(col);
+    return it ? it->text() : QString();
+}
+
+class CopyableTableWidget final : public QTableWidget {
+public:
+    using QTableWidget::QTableWidget;
+
+protected:
+    void keyPressEvent(QKeyEvent* e) override {
+        if (e && e->matches(QKeySequence::Copy)) {
+            const QString text = buildCopyText();
+            if (!text.isEmpty()) {
+                QApplication::clipboard()->setText(text, QClipboard::Clipboard);
+                e->accept();
+                return;
+            }
+        }
+        QTableWidget::keyPressEvent(e);
+    }
+
+private:
+    QString buildSingleCellText(int row, int col) const {
+        if (row < 0 || col < 0 || row >= rowCount() || col >= columnCount()) return {};
+
+        if (columnCount() == 2) {
+            return tableItemText(this, row, 0) + "\t" + tableItemText(this, row, 1);
+        }
+
+        const QString header = tableHeaderText(this, col);
+        const QString value = tableItemText(this, row, col);
+        return header.isEmpty() ? value : (header + "\t" + value);
+    }
+
+    QString buildCopyText() const {
+        const QList<QTableWidgetSelectionRange> ranges = selectedRanges();
+        if (ranges.isEmpty()) {
+            return buildSingleCellText(currentRow(), currentColumn());
+        }
+
+        const QTableWidgetSelectionRange r = ranges.first();
+        if (r.rowCount() == 1 && r.columnCount() == 1) {
+            return buildSingleCellText(r.topRow(), r.leftColumn());
+        }
+
+        QStringList lines;
+        lines.reserve(r.rowCount() + 1);
+
+        QStringList headers;
+        headers.reserve(r.columnCount());
+        for (int c = r.leftColumn(); c <= r.rightColumn(); ++c) {
+            headers << tableHeaderText(this, c);
+        }
+        lines << headers.join('\t');
+
+        for (int row = r.topRow(); row <= r.bottomRow(); ++row) {
+            QStringList cells;
+            cells.reserve(r.columnCount());
+            for (int col = r.leftColumn(); col <= r.rightColumn(); ++col) {
+                cells << tableItemText(this, row, col);
+            }
+            lines << cells.join('\t');
+        }
+
+        return lines.join('\n');
+    }
+};
+
+class DraggableImageLabel final : public QLabel {
+public:
+    using QLabel::QLabel;
+
+    void setDragPayload(const QPixmap& pm,
+                        const QString& existingFilePath = QString(),
+                        const QString& cacheKey = QString()) {
+        m_dragPixmap = pm;
+        m_dragFilePath.clear();
+
+        const QString existing = existingFilePath.trimmed();
+        if (!existing.isEmpty()) {
+            QFileInfo fi(existing);
+            if (fi.exists() && fi.isFile()) {
+                m_dragFilePath = QDir::cleanPath(fi.absoluteFilePath());
+                return;
+            }
+        }
+
+        if (pm.isNull()) return;
+
+        QString key = cacheKey.trimmed();
+        if (key.isEmpty()) {
+            key = QString::number(pm.cacheKey());
+        }
+
+        m_dragFilePath = ensureCachedDragPng(key, pm);
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e && e->button() == Qt::LeftButton) {
+            m_dragStartPos = e->pos();
+        }
+        QLabel::mousePressEvent(e);
+    }
+
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (!e || !(e->buttons() & Qt::LeftButton)) {
+            QLabel::mouseMoveEvent(e);
+            return;
+        }
+
+        if ((e->pos() - m_dragStartPos).manhattanLength() < QApplication::startDragDistance()) {
+            QLabel::mouseMoveEvent(e);
+            return;
+        }
+
+        if (m_dragPixmap.isNull() && m_dragFilePath.isEmpty()) {
+            return;
+        }
+
+        auto* mime = new QMimeData();
+
+        if (!m_dragFilePath.isEmpty()) {
+            mime->setUrls({QUrl::fromLocalFile(m_dragFilePath)});
+        }
+        if (!m_dragPixmap.isNull()) {
+            mime->setImageData(m_dragPixmap.toImage());
+        }
+
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+
+        QPixmap preview = this->pixmap(Qt::ReturnByValue);
+        if (preview.isNull()) preview = m_dragPixmap;
+        if (!preview.isNull()) {
+            drag->setPixmap(preview.scaled(QSize(220, 220), Qt::KeepAspectRatio, Qt::FastTransformation));
+        }
+
+        drag->exec(Qt::CopyAction);
+    }
+
+private:
+    QPoint m_dragStartPos;
+    QPixmap m_dragPixmap;
+    QString m_dragFilePath;
+};
+
+static void setDragPayloadOnLabel(QLabel* lbl,
+                                  const QPixmap& pm,
+                                  const QString& existingFilePath = QString(),
+                                  const QString& cacheKey = QString()) {
+    if (!lbl) return;
+    static_cast<DraggableImageLabel*>(lbl)->setDragPayload(pm, existingFilePath, cacheKey);
+}
+
 static QString b64All(const QByteArray& b) {
     return QString::fromLatin1(b.toBase64());
 }
@@ -523,18 +725,17 @@ ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     topBar->addWidget(m_btnExportData);
 
     auto* imgs = new QHBoxLayout();
-    m_imgOriginal = new QLabel();
+    m_imgOriginal = new DraggableImageLabel();
     m_imgOriginal->setAlignment(Qt::AlignCenter);
     m_imgOriginal->setFrameShape(QFrame::Box);
     m_imgOriginal->setMinimumHeight(260);
     m_imgOriginal->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    m_imgResult = new QLabel();
+    m_imgResult = new DraggableImageLabel();
     m_imgResult->setAlignment(Qt::AlignCenter);
     m_imgResult->setFrameShape(QFrame::Box);
     m_imgResult->setMinimumHeight(260);
     m_imgResult->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
     imgs->addWidget(m_imgOriginal, 1);
     imgs->addWidget(m_imgResult, 1);
 
@@ -632,6 +833,9 @@ void ResultView::clearAll() {
     m_srcOriginal = QPixmap();
     m_srcResult = QPixmap();
 
+    setDragPayloadOnLabel(m_imgOriginal, m_srcOriginal, m_originalPath);
+    setDragPayloadOnLabel(m_imgResult, m_srcResult, QString(), "result_clear");
+
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
     applyScaled(m_imgResult,   m_srcResult,   m_keyResult,   m_targetResult,   m_scaledResult);
 
@@ -650,6 +854,7 @@ void ResultView::clearRunKeepPreview() {
     m_lastResult = ModuleResult();
 
     m_srcResult = QPixmap();
+    setDragPayloadOnLabel(m_imgResult, m_srcResult, QString(), "result_clear");
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
     clearDynamicTableTabs();
@@ -675,6 +880,7 @@ void ResultView::loadOriginal(const QString& path) {
     pm.setDevicePixelRatio(1.0);
     m_srcOriginal = pm;
     m_srcOriginal.setDevicePixelRatio(1.0);
+    setDragPayloadOnLabel(m_imgOriginal, m_srcOriginal, path, QFileInfo(path).completeBaseName());
 }
 void ResultView::setPreviewImage(const QString& originalPath) {
     m_originalPath = originalPath;
@@ -683,6 +889,7 @@ void ResultView::setPreviewImage(const QString& originalPath) {
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
 
     m_srcResult = QPixmap();
+    setDragPayloadOnLabel(m_imgResult, m_srcResult, QString(), "result_clear");
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
     clearDynamicTableTabs();
@@ -710,6 +917,7 @@ void ResultView::setPreviewFromRunner(const QString& originalPath, const QString
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
 
     m_srcResult = QPixmap();
+    setDragPayloadOnLabel(m_imgResult, m_srcResult, QString(), "result_clear");
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
     clearDynamicTableTabs();
@@ -735,10 +943,11 @@ void ResultView::setPreviewFromRaw(const QString& originalPath, const QImage& pr
     pm.setDevicePixelRatio(1.0);
     m_srcOriginal = pm;
     m_srcOriginal.setDevicePixelRatio(1.0);
-
+    setDragPayloadOnLabel(m_imgOriginal, m_srcOriginal, originalPath, QFileInfo(originalPath).completeBaseName());
     applyScaled(m_imgOriginal, m_srcOriginal, m_keyOriginal, m_targetOriginal, m_scaledOriginal);
 
     m_srcResult = QPixmap();
+    setDragPayloadOnLabel(m_imgResult, m_srcResult, QString(), "result_clear");
     applyScaled(m_imgResult, m_srcResult, m_keyResult, m_targetResult, m_scaledResult);
 
     clearDynamicTableTabs();
@@ -878,6 +1087,12 @@ void ResultView::renderResultPixmap() {
     pm.setDevicePixelRatio(1.0);
     m_srcResult = pm;
     m_srcResult.setDevicePixelRatio(1.0);
+    setDragPayloadOnLabel(
+        m_imgResult,
+        m_srcResult,
+        QString(),
+        QString("result_%1").arg(QString::number(m_srcResult.cacheKey()))
+    );
 }
 
 static bool extractGpsLatLonFromExifRoot(const QJsonObject& exifRoot, double& lat, double& lon) {
@@ -930,7 +1145,6 @@ static void injectGpsToDetections(ModuleResult& r) {
 }
 
 void ResultView::setResult(const ModuleResult& r) {
-    // Сохраняем метаданные файла, которые были извлечены при выборе изображения (setPreviewImage)
     QJsonObject fileMetaSaved;
     if (m_lastResult.exif.contains("file") && m_lastResult.exif.value("file").isObject()) {
         fileMetaSaved = m_lastResult.exif.value("file").toObject();
@@ -991,7 +1205,7 @@ void ResultView::setResult(const ModuleResult& r) {
 }
 
 QTableWidget* ResultView::makeStdTable(QWidget* parent) {
-    auto* t = new QTableWidget(parent);
+    auto* t = new CopyableTableWidget(parent);
     t->setColumnCount(0);
     t->setRowCount(0);
     t->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1002,6 +1216,13 @@ QTableWidget* ResultView::makeStdTable(QWidget* parent) {
     t->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     t->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     t->horizontalHeader()->setStretchLastSection(false);
+
+    t->setDragEnabled(false);
+    t->viewport()->setAcceptDrops(false);
+    t->setDropIndicatorShown(false);
+    t->setDragDropMode(QAbstractItemView::NoDragDrop);
+    t->setDefaultDropAction(Qt::IgnoreAction);
+
     return t;
 }
 

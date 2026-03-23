@@ -18,10 +18,12 @@ class ClustersTab : public QWidget {
     Q_OBJECT
 public:
     explicit ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent = nullptr);
+    void setYoloModelPath(const QString& absPath);
 
 signals:
     void imageSelected(const QString& imagePath);
     void resultReady(const QString& imagePath, const ModuleResult& result);
+    void yoloModelChanged(const QString& absPath);
 
 private:
     AppConfig m_cfg;
@@ -46,6 +48,7 @@ private:
     QString yoloDirAbs() const;
     void reloadYoloModels();
     QString currentYoloModelPath() const;
+    void rememberYoloModelPath(const QString& absPath);
 
     void applyPreview(const QString& imagePath);
     bool runPreviewTaskRaw(const QString& inputPath, QImage& outImage, QJsonObject& outExifRoot, QString& err);

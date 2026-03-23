@@ -379,21 +379,20 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
             selectYoloInCombo(m_yoloModel, imported.last());
         }
 
-        s.setValue("ui/last_yolo_model_path", imported.last());
-        s.sync();
+        rememberYoloModelPath(imported.last());
+        emit yoloModelChanged(imported.last());
 
         if (!failed.isEmpty()) {
             QMessageBox::warning(this, "YOLO", failed.join("\n"));
         }
     });
 
-    connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString& t){
-        const QString p = t.trimmed();
-        if (!p.isEmpty()) {
-            QSettings s(uiIniPathFull(), QSettings::IniFormat);
-            s.setValue("ui/last_yolo_model_path", p);
-            s.sync();
-        }
+    connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString&) {
+        const QString p = currentYoloModelPath();
+        if (p.isEmpty()) return;
+
+        rememberYoloModelPath(p);
+        emit yoloModelChanged(p);
     });
 
     connect(m_run, &QPushButton::clicked, this, [this]{
@@ -510,6 +509,29 @@ QString FullDistanceTab::currentYoloModelPath() const {
     }
 
     return QDir::cleanPath(fi.absoluteFilePath());
+}
+
+void FullDistanceTab::rememberYoloModelPath(const QString& absPath) {
+    const QString p = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+    if (p.isEmpty()) return;
+
+    QSettings s(uiIniPathFull(), QSettings::IniFormat);
+    s.setValue("ui/last_yolo_model_path", p);
+    s.sync();
+}
+
+void FullDistanceTab::setYoloModelPath(const QString& absPath) {
+    const QString p = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+    if (p.isEmpty()) return;
+
+    reloadYoloModels();
+
+    if (m_yoloModel) {
+        QSignalBlocker b(m_yoloModel);
+        selectYoloInCombo(m_yoloModel, p);
+    }
+
+    rememberYoloModelPath(p);
 }
 
 static QString absPathLocalFull(const QString& appDir, const QString& relOrAbs) {
