@@ -148,6 +148,14 @@ class DraggableImageLabel final : public QLabel {
 public:
     using QLabel::QLabel;
 
+    QSize sizeHint() const override {
+        return QSize(320, 260);
+    }
+
+    QSize minimumSizeHint() const override {
+        return QSize(160, 260);
+    }
+
     void setDragPayload(const QPixmap& pm,
                         const QString& existingFilePath = QString(),
                         const QString& cacheKey = QString()) {
@@ -729,13 +737,15 @@ ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     m_imgOriginal->setAlignment(Qt::AlignCenter);
     m_imgOriginal->setFrameShape(QFrame::Box);
     m_imgOriginal->setMinimumHeight(260);
-    m_imgOriginal->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_imgOriginal->setMinimumWidth(0);
+    m_imgOriginal->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     m_imgResult = new DraggableImageLabel();
     m_imgResult->setAlignment(Qt::AlignCenter);
     m_imgResult->setFrameShape(QFrame::Box);
     m_imgResult->setMinimumHeight(260);
-    m_imgResult->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_imgResult->setMinimumWidth(0);
+    m_imgResult->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     imgs->addWidget(m_imgOriginal, 1);
     imgs->addWidget(m_imgResult, 1);
 
