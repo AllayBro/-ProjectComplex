@@ -1605,6 +1605,7 @@ static bool readJsonDoubleFlexibleLocal(const QJsonObject& o, const char* key, d
     bool ok = false;
     const QJsonValue v = o.value(QString::fromLatin1(key));
 
+
     if (v.isDouble()) {
         out = v.toDouble();
         ok = qIsFinite(out);
