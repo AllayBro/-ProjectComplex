@@ -60,6 +60,29 @@ def _bottom_center_px(vehicle: Dict[str, Any]) -> Optional[list[float]]:
     return None
 
 
+def _resolve_focal_px(vehicle: Dict[str, Any], artifacts: Dict[str, Any], image_w: int) -> Optional[float]:
+    focal_px = _safe_float(artifacts.get("focal_px_x"))
+    if focal_px is None or focal_px <= 1.0:
+        focal_px = _safe_float(artifacts.get("focal_px_y"))
+
+    meta = vehicle.get("meta") if isinstance(vehicle, dict) else None
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px"))
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px_x"))
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px_y"))
+
+    if (focal_px is None or focal_px <= 1.0) and image_w > 0:
+        focal_mm = 4.25
+        sensor_width_mm = 5.6
+        focal_px = (focal_mm / sensor_width_mm) * float(image_w)
+
+    if focal_px is None or focal_px <= 1.0:
+        return None
+    return float(focal_px)
+
+
 def _vehicle_heading_offset_deg(vehicle: Dict[str, Any], artifacts: Dict[str, Any], image_w: int) -> float:
     if not vehicle or image_w <= 0:
         return 0.0
@@ -72,10 +95,8 @@ def _vehicle_heading_offset_deg(vehicle: Dict[str, Any], artifacts: Dict[str, An
     if x is None:
         return 0.0
 
-    focal_px = _safe_float(artifacts.get("focal_px_x"))
-    if focal_px is None or focal_px <= 1.0:
-        focal_px = _safe_float(artifacts.get("focal_px_y"))
-    if focal_px is None or focal_px <= 1.0:
+    focal_px = _resolve_focal_px(vehicle, artifacts, image_w)
+    if focal_px is None:
         return 0.0
 
     dx = float(x) - float(image_w) * 0.5

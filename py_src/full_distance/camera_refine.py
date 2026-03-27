@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+import json
+import os
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +24,33 @@ def _safe_float(value: Any) -> Optional[float]:
     except Exception:
         return None
 
+def _read_manual_georef(image_path: str) -> Dict[str, Any]:
+    sidecar_path = os.path.abspath(f"{image_path}.georef.json")
+    if not os.path.exists(sidecar_path):
+        return {}
+
+    try:
+        with open(sidecar_path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+    except Exception:
+        return {}
+
+    if not isinstance(obj, dict):
+        return {}
+
+    lat = _safe_float(obj.get("camera_lat"))
+    lon = _safe_float(obj.get("camera_lon"))
+    az = _safe_float(obj.get("camera_azimuth_deg"))
+    unc = _safe_float(obj.get("uncertainty_m"))
+
+    return {
+        "path": sidecar_path,
+        "lat": lat,
+        "lon": lon,
+        "azimuth_deg": az,
+        "uncertainty_m": unc,
+    }
+    return out
 
 def _norm_angle(deg: float) -> float:
     while deg < 0.0:
@@ -308,6 +336,29 @@ def _latlon_from_xy(x: float, y: float, lat0: float, lon0: float) -> Tuple[float
     return lat, lon
 
 
+def _resolve_focal_px(primary_vehicle: Dict[str, Any], artifacts: Dict[str, Any], image_w: int) -> Optional[float]:
+    focal_px = _safe_float(artifacts.get("focal_px_x"))
+    if focal_px is None or focal_px <= 1.0:
+        focal_px = _safe_float(artifacts.get("focal_px_y"))
+
+    meta = primary_vehicle.get("meta") if isinstance(primary_vehicle, dict) else None
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px"))
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px_x"))
+    if (focal_px is None or focal_px <= 1.0) and isinstance(meta, dict):
+        focal_px = _safe_float(meta.get("focal_px_y"))
+
+    if (focal_px is None or focal_px <= 1.0) and image_w > 0:
+        focal_mm = 4.25
+        sensor_width_mm = 5.6
+        focal_px = (focal_mm / sensor_width_mm) * float(image_w)
+
+    if focal_px is None or focal_px <= 1.0:
+        return None
+    return float(focal_px)
+
+
 def _vehicle_heading_offset_deg(primary_vehicle: Dict[str, Any], artifacts: Dict[str, Any], image_w: int) -> float:
     if not primary_vehicle or image_w <= 0:
         return 0.0
@@ -320,10 +371,8 @@ def _vehicle_heading_offset_deg(primary_vehicle: Dict[str, Any], artifacts: Dict
     if x is None:
         return 0.0
 
-    focal_px = _safe_float(artifacts.get("focal_px_x"))
-    if focal_px is None or focal_px <= 1.0:
-        focal_px = _safe_float(artifacts.get("focal_px_y"))
-    if focal_px is None or focal_px <= 1.0:
+    focal_px = _resolve_focal_px(primary_vehicle, artifacts, image_w)
+    if focal_px is None:
         return 0.0
 
     dx = float(x) - float(image_w) * 0.5
@@ -497,12 +546,24 @@ def refine_camera_pose(
 
     exif_seed = _read_exif_seed(image_path)
     coarse_seed = _read_coarse_seed(artifacts)
-
+    manual_georef = _read_manual_georef(image_path)
     seed_source = "none"
     init_lat = None
     init_lon = None
+    manual_lat = _safe_float(manual_georef.get("lat"))
+    manual_lon = _safe_float(manual_georef.get("lon"))
+    manual_az = _safe_float(manual_georef.get("azimuth_deg"))
+    manual_unc = _safe_float(manual_georef.get("uncertainty_m"))
 
-    if "lat" in coarse_seed and "lon" in coarse_seed:
+    manual_lat_f = float(manual_lat) if manual_lat is not None else None
+    manual_lon_f = float(manual_lon) if manual_lon is not None else None
+    manual_az_f = _norm_angle(float(manual_az)) if manual_az is not None else None
+
+    if manual_lat_f is not None and manual_lon_f is not None:
+        seed_source = "manual"
+        init_lat = manual_lat_f
+        init_lon = manual_lon_f
+    elif "lat" in coarse_seed and "lon" in coarse_seed:
         seed_source = "coarse"
         init_lat = coarse_seed.get("lat")
         init_lon = coarse_seed.get("lon")
@@ -511,8 +572,7 @@ def refine_camera_pose(
         init_lat = exif_seed.get("lat")
         init_lon = exif_seed.get("lon")
 
-    exif_heading = exif_seed.get("heading_deg")
-
+    exif_heading = manual_az_f if manual_az_f is not None else exif_seed.get("heading_deg")
     active_seed = coarse_seed if seed_source == "coarse" else exif_seed
     search_radius_m = _search_radius_m(
         seed_source=seed_source,
@@ -530,6 +590,55 @@ def refine_camera_pose(
         image_h=int(image_h),
         cfg=scene_cfg,
     )
+
+    has_manual_pose = (
+            manual_lat_f is not None
+            and manual_lon_f is not None
+            and manual_az_f is not None
+    )
+
+    if has_manual_pose:
+        if manual_unc is not None and float(manual_unc) >= 0.0:
+            uncertainty = float(manual_unc)
+        else:
+            uncertainty = 15.0
+
+        return {
+            "status": "manual_override",
+            "camera_init_lat": round(manual_lat_f, 8),
+            "camera_init_lon": round(manual_lon_f, 8),
+            "camera_search_radius_m": round(float(uncertainty), 3),
+            "camera_refined_lat": round(manual_lat_f, 8),
+            "camera_refined_lon": round(manual_lon_f, 8),
+            "camera_refined_azimuth_deg": round(manual_az_f, 3),
+            "camera_confidence": 1.0,
+            "camera_uncertainty_m": round(float(uncertainty), 3),
+            "refine_method": "manual_georef_override_v1",
+            "refine_debug_path": "",
+            "needs_manual_review": False,
+            "seed_source": "manual",
+            "azimuth_source": "manual",
+            "offline_context": {
+                "status": "manual_override",
+            },
+            "candidate_search": {
+                "mode": "manual_override",
+                "evaluated_count": 0,
+                "best_score": 1.0,
+                "best_candidate": {
+                    "lat": round(manual_lat_f, 8),
+                    "lon": round(manual_lon_f, 8),
+                    "heading_deg": round(manual_az_f, 3),
+                    "dist_from_init_m": 0.0,
+                    "cross_offset_m": 0.0,
+                    "along_offset_m": 0.0,
+                    "score": 1.0,
+                },
+                "heading_source": "manual",
+                "heading_offset_deg": 0.0,
+                "top_candidates": [],
+            },
+        }
 
     if init_lat is None or init_lon is None:
         return {

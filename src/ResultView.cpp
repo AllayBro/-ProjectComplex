@@ -83,7 +83,8 @@ static QString tableHeaderText(const QTableWidget* t, int col) {
     return it ? it->text() : QString();
 }
 
-class CopyableTableWidget final : public QTableWidget {
+class CopyableTableWidget final : public QTableWidget
+{
 public:
     using QTableWidget::QTableWidget;
 
@@ -114,32 +115,40 @@ private:
     }
 
     QString buildCopyText() const {
-        const QList<QTableWidgetSelectionRange> ranges = selectedRanges();
-        if (ranges.isEmpty()) {
+        auto* sm = selectionModel();
+        if (!sm) {
             return buildSingleCellText(currentRow(), currentColumn());
         }
 
-        const QTableWidgetSelectionRange r = ranges.first();
-        if (r.rowCount() == 1 && r.columnCount() == 1) {
-            return buildSingleCellText(r.topRow(), r.leftColumn());
+        QModelIndexList selectedRowIndexes = sm->selectedRows();
+        if (selectedRowIndexes.isEmpty()) {
+            return buildSingleCellText(currentRow(), currentColumn());
         }
 
-        QStringList lines;
-        lines.reserve(r.rowCount() + 1);
+        std::sort(selectedRowIndexes.begin(), selectedRowIndexes.end(),
+                  [](const QModelIndex& a, const QModelIndex& b) {
+                      return a.row() < b.row();
+                  });
 
+        QStringList lines;
         QStringList headers;
-        headers.reserve(r.columnCount());
-        for (int c = r.leftColumn(); c <= r.rightColumn(); ++c) {
-            headers << tableHeaderText(this, c);
+        headers.reserve(columnCount());
+
+        for (int col = 0; col < columnCount(); ++col) {
+            headers << tableHeaderText(this, col);
         }
         lines << headers.join('\t');
 
-        for (int row = r.topRow(); row <= r.bottomRow(); ++row) {
+        for (const QModelIndex& idx : selectedRowIndexes) {
+            const int row = idx.row();
+
             QStringList cells;
-            cells.reserve(r.columnCount());
-            for (int col = r.leftColumn(); col <= r.rightColumn(); ++col) {
+            cells.reserve(columnCount());
+
+            for (int col = 0; col < columnCount(); ++col) {
                 cells << tableItemText(this, row, col);
             }
+
             lines << cells.join('\t');
         }
 
@@ -1324,12 +1333,12 @@ QTableWidget* ResultView::makeStdTable(QWidget* parent) {
     t->setRowCount(0);
     t->setEditTriggers(QAbstractItemView::NoEditTriggers);
     t->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    t->setSelectionBehavior(QAbstractItemView::SelectItems);
+    t->setSelectionBehavior(QAbstractItemView::SelectRows);
     t->setSortingEnabled(true);
     t->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     t->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    t->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    t->horizontalHeader()->setStretchLastSection(false);
+    t->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    t->horizontalHeader()->setStretchLastSection(true);
 
     t->setDragEnabled(false);
     t->viewport()->setAcceptDrops(false);

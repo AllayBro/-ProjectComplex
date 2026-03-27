@@ -511,6 +511,18 @@ QString FullDistanceTab::currentYoloModelPath() const {
     return QDir::cleanPath(fi.absoluteFilePath());
 }
 
+QString FullDistanceTab::currentImagePath() const {
+    if (!m_input) return {};
+
+    const QString p = m_input->text().trimmed();
+    if (p.isEmpty()) return {};
+
+    QFileInfo fi(p);
+    if (!fi.exists() || !fi.isFile()) return {};
+
+    return fi.absoluteFilePath();
+}
+
 void FullDistanceTab::rememberYoloModelPath(const QString& absPath) {
     const QString p = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
     if (p.isEmpty()) return;

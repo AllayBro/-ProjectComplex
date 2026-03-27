@@ -8,6 +8,7 @@
 class QQuickWidget;
 class QQuickItem;
 class QLabel;
+class QTableWidget;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
@@ -21,7 +22,6 @@ public:
 public slots:
     void onImageSelected(const QString& imagePath);
     void onResultReady(const QString& imagePath, const ModuleResult& r);
-
 private slots:
     void onMarkerClicked(const QString& imagePath);
     void onMapClicked(double lat, double lon);
@@ -29,12 +29,10 @@ private slots:
     void onSetCameraPointMode();
     void onSetDirectionMode();
     void onClearGeoRef();
-    void onSaveGeoRef();
 
     void probeNetworkNow();
     void onProbeFinished();
     void onProbeTimeout();
-
 
 
 private:
@@ -86,6 +84,7 @@ private:
         QString vehicleGeoStatus;
         QString vehicleGeoJsonPath;
         QVariantList vehiclePoints;
+        QVariantList vehicleShapes;
         QString make;
         QString model;
         QString dateTime;
@@ -112,10 +111,11 @@ private:
 
     QLabel* m_netStatus = nullptr;
     QLabel* m_geoStatus = nullptr;
+    QTableWidget* m_imagesTable = nullptr;
+    QLabel* m_infoPanel = nullptr;
     QPushButton* m_btnSetCameraPoint = nullptr;
     QPushButton* m_btnSetDirection = nullptr;
     QPushButton* m_btnClearGeoRef = nullptr;
-    QPushButton* m_btnSaveGeoRef = nullptr;
 
     QHash<QString, Item> m_items;
     QString m_selected;
@@ -134,19 +134,23 @@ private:
     void pushModelToQml();
     void selectItem(const QString& imagePath);
     void updateInfoPanel(const Item& it);
+    void refreshItemsTable();
     void updateNetLabel();
     void updateGeoStatus(const QString& text = QString());
     void updateGeoControlsFromSelection();
     void syncSelectedToQml();
     void applyCoarseGeoSearch(const QJsonObject& artifactsObj, Item& out);
+    static void clearVehicleGeo(Item& it);
+    static bool reprojectVehiclesForCurrentCamera(Item& it, QString* err = nullptr);
 
     static bool readExifMini(const QString& imagePath, Item& out);
     static void applyRunnerExif(const QJsonObject& exifObj, Item& out);
     static void applyCameraRefine(const QJsonObject& artifactsObj, Item& out);
     static void applyVehicleGeo(const QJsonObject& artifactsObj, Item& out);
     static bool itemDisplayCoords(const Item& it, double& lat, double& lon, QString* source = nullptr);
-    static QString defaultLocationSource(const Item& it);
+    static QString normalizedImageKey(const QString& imagePath);
     static QString geoRefSidecarPath(const QString& imagePath);
+    static QString defaultLocationSource(const Item& it);
     static bool loadGeoRef(const QString& imagePath, Item& out, QString* err = nullptr);
     static bool saveGeoRef(const Item& it, QString* err = nullptr);
     static double normalizeAzimuth(double value);

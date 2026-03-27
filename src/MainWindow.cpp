@@ -61,4 +61,36 @@ void MainWindow::bindSignals() {
 
     connect(m_clusters, &ClustersTab::yoloModelChanged, m_full, &FullDistanceTab::setYoloModelPath);
     connect(m_full, &FullDistanceTab::yoloModelChanged, m_clusters, &ClustersTab::setYoloModelPath);
+
+    if (m_clusters) {
+        const QString p = m_clusters->currentImagePath();
+        if (!p.isEmpty()) {
+            m_map->onImageSelected(p);
+        }
+    }
+
+    if (m_full) {
+        const QString p = m_full->currentImagePath();
+        if (!p.isEmpty()) {
+            m_map->onImageSelected(p);
+        }
+    }
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
+        QString p;
+
+        QWidget* current = m_tabs->widget(index);
+
+        if (current == m_full && m_full) {
+            p = m_full->currentImagePath();
+        } else if (current == m_clusters && m_clusters) {
+            p = m_clusters->currentImagePath();
+        } else {
+            if (m_full) p = m_full->currentImagePath();
+            if (p.isEmpty() && m_clusters) p = m_clusters->currentImagePath();
+        }
+
+        if (!p.isEmpty()) {
+            m_map->onImageSelected(p);
+        }
+    });
 }
