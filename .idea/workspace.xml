@@ -30,10 +30,12 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="23.03 - v0.7 - Add metrix">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.03 - v0.7.1 - Full metrix map">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ClustersTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
@@ -41,7 +43,6 @@
       <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -61,6 +62,7 @@
     </option>
   </component>
   <component name="Git.Settings">
+    <option name="PUSH_AUTO_UPDATE" value="true" />
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
     <option name="RESET_MODE" value="SOFT" />
     <option name="UPDATE_TYPE" value="REBASE" />
@@ -285,7 +287,9 @@
       <workItem from="1774432838210" duration="9616000" />
       <workItem from="1774511561633" duration="954000" />
       <workItem from="1774529687687" duration="4327000" />
-      <workItem from="1774613403635" duration="17000" />
+      <workItem from="1774613403635" duration="28432000" />
+      <workItem from="1775036187883" duration="2794000" />
+      <workItem from="1775141506146" duration="4948000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -591,7 +595,23 @@
       <option name="project" value="LOCAL" />
       <updated>1774273204950</updated>
     </task>
-    <option name="localTasksCounter" value="39" />
+    <task id="LOCAL-00039" summary="27.03 - v0.7.1 - Full metrix map">
+      <option name="closed" value="true" />
+      <created>1774613502442</created>
+      <option name="number" value="00039" />
+      <option name="presentableId" value="LOCAL-00039" />
+      <option name="project" value="LOCAL" />
+      <updated>1774613502442</updated>
+    </task>
+    <task id="LOCAL-00040" summary="27.03 - v0.7.1 - Full metrix map">
+      <option name="closed" value="true" />
+      <created>1774613579432</created>
+      <option name="number" value="00040" />
+      <option name="presentableId" value="LOCAL-00040" />
+      <option name="project" value="LOCAL" />
+      <updated>1774613579432</updated>
+    </task>
+    <option name="localTasksCounter" value="41" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -634,7 +654,8 @@
     <MESSAGE value="19.03 - v0.6.2 - Add full vehicle auto" />
     <MESSAGE value="23.03 - v0.6.3 - Fix bug cluster mashine" />
     <MESSAGE value="23.03 - v0.7 - Add metrix" />
-    <option name="LAST_COMMIT_MESSAGE" value="23.03 - v0.7 - Add metrix" />
+    <MESSAGE value="27.03 - v0.7.1 - Full metrix map" />
+    <option name="LAST_COMMIT_MESSAGE" value="27.03 - v0.7.1 - Full metrix map" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -643,6 +664,10 @@
           <url>file://$PROJECT_DIR$/python/runner.py</url>
           <line>316</line>
           <option name="timeStamp" value="4" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/AppConfig.cpp</url>
+          <option name="timeStamp" value="5" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

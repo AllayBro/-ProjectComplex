@@ -25,6 +25,17 @@ static QString uiIniPathClusters() {
     return QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
 }
 
+static QString readSavedDeviceModeClusters(const AppConfig& cfg) {
+    QSettings s(uiIniPathClusters(), QSettings::IniFormat);
+    return cfg.normalizeDeviceMode(s.value("ui/current_device_mode", "auto").toString());
+}
+
+static void saveDeviceModeClusters(const AppConfig& cfg, const QString& mode) {
+    QSettings s(uiIniPathClusters(), QSettings::IniFormat);
+    s.setValue("ui/current_device_mode", cfg.normalizeDeviceMode(mode));
+    s.sync();
+}
+
 static QString uiDefaultImagesDirClusters() {
     QString d = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     if (d.isEmpty()) d = QDir::homePath();
@@ -217,13 +228,19 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     row3->setContentsMargins(0, 0, 0, 0);
     row3->setSpacing(8);
 
-    auto* deviceLabel = new QLabel("Device:");
+    auto* deviceLabel = new QLabel("Устройство:");
     deviceLabel->setFixedHeight(topCtrlH);
     deviceLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
 
+    QString gpuInfo;
+    const bool gpuAvailable = m_cfg.isGpuAvailable(m_appDir, &gpuInfo);
+
     m_device = new QComboBox();
-    m_device->addItems({"auto", "gpu", "cpu"});
+    m_device->addItem("auto");
+    if (gpuAvailable) m_device->addItem("gpu");
+    m_device->addItem("cpu");
     m_device->setFixedSize(140, topCtrlH);
+
 
     row3->addWidget(deviceLabel);
     row3->addWidget(m_device, 0, Qt::AlignLeft | Qt::AlignVCenter);
@@ -250,24 +267,38 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     root->addLayout(row3);
     root->addLayout(rowBtns);
     root->addWidget(scroll, 1);
-
     {
         QSettings s(uiIniPathClusters(), QSettings::IniFormat);
 
         const QString lastYolo = s.value("ui/last_yolo_model_path", m_cfg.yoloModelPath).toString();
         const QString lastIn = s.value("ui/last_input_path", "").toString();
+        QString deviceNote;
+        const QString lastDevice = m_cfg.effectiveDeviceMode(m_appDir, readSavedDeviceModeClusters(m_cfg), &deviceNote);
 
         reloadYoloModels();
         if (m_yoloModel) {
             QSignalBlocker b(m_yoloModel);
             m_yoloModel->setEditText(lastYolo);
         }
+
+        setDeviceMode(lastDevice);
+
         if (!lastIn.isEmpty() && QFileInfo(lastIn).exists()) {
             QSignalBlocker b(m_input);
             m_input->setText(lastIn);
             applyPreview(lastIn);
             emit imageSelected(lastIn);
         }
+
+        if (!gpuAvailable) {
+            const QString msg = gpuInfo.trimmed().isEmpty()
+                ? QStringLiteral("GPU check: GPU недоступен.")
+                : QStringLiteral("GPU check: ") + gpuInfo.trimmed();
+            m_view->appendLog(msg);
+        }
+
+        if (!deviceNote.isEmpty())
+            m_view->appendLog(deviceNote);
 
         s.sync();
     }
@@ -302,11 +333,16 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
     });
 
     connect(m_yoloModel, &QComboBox::currentTextChanged, this, [this](const QString&) {
-    const QString p = currentYoloModelPath();
-    if (p.isEmpty()) return;
 
-    rememberYoloModelPath(p);
-    emit yoloModelChanged(p);
+            const QString p = currentYoloModelPath();
+            if (p.isEmpty()) return;
+
+            rememberYoloModelPath(p);
+            emit yoloModelChanged(p);
+});
+    connect(m_device, &QComboBox::currentTextChanged, this, [this](const QString& mode) {
+        saveDeviceModeClusters(m_cfg, mode);
+        emit deviceModeChanged(currentDeviceMode());
 });
 
     connect(m_input, &QLineEdit::textChanged, this, [this](const QString& t) {
@@ -379,8 +415,12 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
                 return;
             }
             const QString in = m_input->text().trimmed();
-            const QString dev = m_device->currentText();
-
+            QString devNote;
+            const QString dev = m_cfg.effectiveDeviceMode(m_appDir, currentDeviceMode(), &devNote);
+            if (!devNote.isEmpty()) {
+                m_view->logEdit()->append(devNote);
+                setDeviceMode(dev);
+            }
             const QString out;
 
             QString yolo = currentYoloModelPath();
@@ -511,6 +551,24 @@ void ClustersTab::setYoloModelPath(const QString& absPath) {
     rememberYoloModelPath(p);
 }
 
+void ClustersTab::setDeviceMode(const QString& mode) {
+    if (!m_device) return;
+
+    const QString effective = m_cfg.effectiveDeviceMode(m_appDir, mode);
+    int idx = m_device->findText(effective);
+    if (idx < 0) idx = m_device->findText("auto");
+    if (idx < 0) return;
+
+    QSignalBlocker b(m_device);
+    m_device->setCurrentIndex(idx);
+    saveDeviceModeClusters(m_cfg, m_device->currentText());
+}
+
+QString ClustersTab::currentDeviceMode() const {
+    if (!m_device) return QStringLiteral("auto");
+    return m_cfg.normalizeDeviceMode(m_device->currentText());
+}
+
 static QString absPathLocal(const QString& appDir, const QString& relOrAbs) {
     QFileInfo fi(relOrAbs);
     if (fi.isAbsolute()) return fi.absoluteFilePath();
@@ -551,7 +609,7 @@ bool ClustersTab::runPreviewTaskRaw(const QString& inputPath, QImage& outImage, 
          << "--task" << "preview"
          << "--input" << inputPath
          << "--output-dir" << workDir
-         << "--device" << (m_device ? m_device->currentText() : QString("auto"))
+         << "--device" << currentDeviceMode()
          << "--config" << basePyCfg
          << "--result-json" << resultJson;
 

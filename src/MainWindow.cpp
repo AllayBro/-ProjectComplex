@@ -62,6 +62,12 @@ void MainWindow::bindSignals() {
     connect(m_clusters, &ClustersTab::yoloModelChanged, m_full, &FullDistanceTab::setYoloModelPath);
     connect(m_full, &FullDistanceTab::yoloModelChanged, m_clusters, &ClustersTab::setYoloModelPath);
 
+    connect(m_clusters, &ClustersTab::deviceModeChanged, m_full, &FullDistanceTab::setDeviceMode);
+    connect(m_full, &FullDistanceTab::deviceModeChanged, m_clusters, &ClustersTab::setDeviceMode);
+    connect(m_clusters, &ClustersTab::deviceModeChanged, m_map, &MapTab::setDeviceMode);
+    connect(m_full, &FullDistanceTab::deviceModeChanged, m_map, &MapTab::setDeviceMode);
+
+
     if (m_clusters) {
         const QString p = m_clusters->currentImagePath();
         if (!p.isEmpty()) {

@@ -33,7 +33,8 @@
 #include <algorithm>
 #include <limits>
 #include <QItemSelectionModel>
-
+#include <QSettings>
+#include <QVBoxLayout>
 
 static QVariantMap vehicleShapeLocal(double lat,
                                      double lon,
@@ -445,7 +446,6 @@ Item {
 }
 )QML");
 }
-
 static QString absPathLocalMap(const QString& appDir, const QString& relOrAbs) {
     QFileInfo fi(relOrAbs);
     if (fi.isAbsolute()) return fi.absoluteFilePath();
@@ -457,6 +457,15 @@ static QString tempBaseDirLocalMap() {
     if (d.isEmpty()) d = QDir::tempPath();
     if (d.isEmpty()) d = QDir::homePath();
     return d;
+}
+
+static QString uiIniPathMap() {
+    return QDir(QCoreApplication::applicationDirPath()).filePath("ui.ini");
+}
+
+static QString readSavedDeviceModeMap(const AppConfig& cfg) {
+    QSettings s(uiIniPathMap(), QSettings::IniFormat);
+    return cfg.normalizeDeviceMode(s.value("ui/current_device_mode", "auto").toString());
 }
 
 QString MapTab::normalizedImageKey(const QString& imagePath)
@@ -477,6 +486,7 @@ QString MapTab::normalizedImageKey(const QString& imagePath)
 
 static bool readExifViaRunnerPreviewMap(const AppConfig& cfg,
                                         const QString& inputPath,
+                                        const QString& deviceMode,
                                         QJsonObject& outExif,
                                         QString& err) {
     outExif = QJsonObject();
@@ -505,7 +515,7 @@ static bool readExifViaRunnerPreviewMap(const AppConfig& cfg,
          << "--task" << "preview"
          << "--input" << inputPath
          << "--output-dir" << workDir
-         << "--device" << "auto"
+         << "--device" << cfg.normalizeDeviceMode(deviceMode)
          << "--config" << basePyCfg
          << "--result-json" << resultJson;
 
@@ -546,7 +556,6 @@ static bool readExifViaRunnerPreviewMap(const AppConfig& cfg,
     return !outExif.isEmpty();
 }
 
-
 static QString boolMarkLocal(bool value)
 {
     return value ? QStringLiteral("да") : QStringLiteral("нет");
@@ -580,6 +589,7 @@ static QString shortNameLocal(const QString& path)
 MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
     : QWidget(parent), m_cfg(cfg)
 {
+    m_deviceMode = m_cfg.effectiveDeviceMode(QCoreApplication::applicationDirPath(), readSavedDeviceModeMap(m_cfg));
     auto* root = new QVBoxLayout(this);
 
     auto* top = new QHBoxLayout();
@@ -662,16 +672,6 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
         QApplication::clipboard()->setText(lines.join('\n'));
     });
 
-    auto* infoTitle = new QLabel("Информация по выбранной фотографии", this);
-    rlay->addWidget(infoTitle);
-
-    m_infoPanel = new QLabel(this);
-    m_infoPanel->setWordWrap(true);
-    m_infoPanel->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    m_infoPanel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_infoPanel->setFrameShape(QFrame::StyledPanel);
-    m_infoPanel->setMinimumHeight(220);
-    rlay->addWidget(m_infoPanel);
     split->addWidget(m_quick);
     split->addWidget(right);
     split->setStretchFactor(0, 3);
@@ -702,7 +702,6 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
         pushModelToQml();
         syncSelectedToQml();
         updateGeoControlsFromSelection();
-        updateInfoPanel(*it);
     });
     initQml();
     updateGeoControlsFromSelection();
@@ -733,6 +732,11 @@ MapTab::MapTab(const AppConfig& cfg, QWidget* parent)
         updateNetLabel();
     }
 }
+
+void MapTab::setDeviceMode(const QString& mode) {
+    m_deviceMode = m_cfg.effectiveDeviceMode(QCoreApplication::applicationDirPath(), mode);
+}
+
 void MapTab::initQml()
 {
     const QString qml = qmlMapView();
@@ -1292,7 +1296,6 @@ void MapTab::selectItem(const QString& imagePath)
     pushModelToQml();
     syncSelectedToQml();
     updateGeoControlsFromSelection();
-    updateInfoPanel(v);
 
     double mapLat = 0.0;
     double mapLon = 0.0;
@@ -1950,36 +1953,6 @@ void MapTab::refreshItemsTable()
     }
 }
 
-void MapTab::updateInfoPanel(const Item& it)
-{
-    if (!m_infoPanel)
-        return;
-
-    QStringList lines;
-    lines << QStringLiteral("Файл: ") + QFileInfo(it.imagePath).fileName();
-    lines << QStringLiteral("Путь: ") + it.imagePath;
-    lines << QStringLiteral("Источник точки на карте: ") + locationSourceTextLocal(it.hasCameraPoint, it.hasRefinedCamera, it.hasCoarseGeo, it.hasGps);
-    lines << QStringLiteral("EXIF: ") + coordTextLocal(it.hasGps, it.lat, it.lon);
-    lines << QStringLiteral("Ручная точка камеры: ") + coordTextLocal(it.hasCameraPoint, it.cameraLat, it.cameraLon);
-    lines << QStringLiteral("Ручное направление: ") + (it.hasCameraAzimuth ? QString::number(it.cameraAzimuthDeg, 'f', 1) + QStringLiteral("°") : QStringLiteral("—"));
-    lines << QStringLiteral("Уточнённая точка: ") + coordTextLocal(it.hasRefinedCamera, it.refinedLat, it.refinedLon);
-    lines << QStringLiteral("Уточнённое направление: ") + (it.hasRefinedAzimuth ? QString::number(it.refinedAzimuthDeg, 'f', 1) + QStringLiteral("°") : QStringLiteral("—"));
-    lines << QStringLiteral("Грубая геопривязка: ") + coordTextLocal(it.hasCoarseGeo, it.coarseLat, it.coarseLon);
-    lines << QStringLiteral("Результат полного режима: ") + boolMarkLocal(it.hasResult);
-    lines << QStringLiteral("Точки машин: ") + QString::number(it.vehiclePoints.size());
-    if (!it.dateTimeOriginal.trimmed().isEmpty())
-        lines << QStringLiteral("DateTimeOriginal: ") + it.dateTimeOriginal;
-    else if (!it.dateTime.trimmed().isEmpty())
-        lines << QStringLiteral("DateTime: ") + it.dateTime;
-    if (!it.make.trimmed().isEmpty() || !it.model.trimmed().isEmpty())
-        lines << QStringLiteral("Камера: ") + (it.make + QStringLiteral(" ") + it.model).trimmed();
-    if (!it.geoRefPath.trimmed().isEmpty())
-        lines << QStringLiteral("GeoRef: ") + it.geoRefPath;
-
-    m_infoPanel->setText(lines.join(QStringLiteral("\n")));
-    refreshItemsTable();
-}
-
 void MapTab::onMarkerClicked(const QString& imagePath)
 {
     selectItem(imagePath);
@@ -2018,7 +1991,6 @@ void MapTab::onMapClicked(double lat, double lon)
         }
 
         m_editMode = EditMode::Idle;
-        updateInfoPanel(*it);
         updateGeoControlsFromSelection();
         pushModelToQml();
         syncSelectedToQml();
@@ -2051,7 +2023,6 @@ void MapTab::onMapClicked(double lat, double lon)
         }
 
         m_editMode = EditMode::Idle;
-        updateInfoPanel(*it);
         updateGeoControlsFromSelection();
         pushModelToQml();
         syncSelectedToQml();
@@ -2109,7 +2080,6 @@ void MapTab::onClearGeoRef()
         statusMessage = saveErr;
 
     m_editMode = EditMode::Idle;
-    updateInfoPanel(*it);
     updateGeoControlsFromSelection();
     pushModelToQml();
     syncSelectedToQml();
@@ -2141,7 +2111,7 @@ void MapTab::onImageSelected(const QString& imagePath)
     if (!it.hasGps) {
         QJsonObject exifObj;
         QString err;
-        if (readExifViaRunnerPreviewMap(m_cfg, it.imagePath, exifObj, err)) {
+        if (readExifViaRunnerPreviewMap(m_cfg, it.imagePath, m_deviceMode, exifObj, err)) {
             applyRunnerExif(exifObj, it);
         }
     }

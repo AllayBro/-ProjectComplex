@@ -40,6 +40,10 @@ public:
     QString yoloDirAbsolute(const QString& appDirPath) const;
     bool ensureYoloDirExists(const QString& appDirPath, QString* errorText = nullptr) const;
 
+    QString normalizeDeviceMode(const QString& deviceMode) const;
+    bool isGpuAvailable(const QString& appDirPath, QString* detail = nullptr) const;
+    QString effectiveDeviceMode(const QString& appDirPath, const QString& requestedMode, QString* note = nullptr) const;
+
 private:
     static QString readAllText(const QString& path);
     static QJsonObject readJsonObjectOrDie(const QString& path);

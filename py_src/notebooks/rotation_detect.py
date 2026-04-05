@@ -136,6 +136,30 @@ def read_image_path(image_path: str):
     return read_image_auto(data)
 yolo = None
 YOLO_DEVICE_ARG = None
+
+def _resolve_device(device_mode: str, cfg: dict):
+    mode = str(device_mode or "auto").lower().strip()
+    gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
+
+    has_cuda = False
+    if torch is not None:
+        try:
+            has_cuda = bool(torch.cuda.is_available())
+        except Exception:
+            has_cuda = False
+
+    if mode == "cpu":
+        return "cpu", "cpu"
+
+    if mode in {"gpu", "cuda"}:
+        if has_cuda:
+            return "gpu", str(gpu_id)
+        return "cpu", "cpu"
+
+    if has_cuda:
+        return "gpu", str(gpu_id)
+
+    return "cpu", "cpu"
 def rotate_bound(img_bgr: np.ndarray, angle_deg: float):
     """
     Поворот без обрезания краёв (expand). Возвращает:
@@ -2026,19 +2050,9 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         ROT_KEEP_IDS = keep_ids if keep_ids else None
     except Exception:
         ROT_KEEP_IDS = None
-    YOLO_DEVICE_ARG = None
-    device_used = "cpu"
-    if (device_mode or "auto") != "cpu" and torch is not None:
-        try:
-            if torch.cuda.is_available():
-                gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
-                YOLO_DEVICE_ARG = str(gpu_id)
-                device_used = "gpu"
-        except Exception:
-            pass
-    if (device_mode or "auto") == "gpu" and device_used != "gpu":
+    device_used, YOLO_DEVICE_ARG = _resolve_device(device_mode, cfg)
+    if str(device_mode or "auto").lower().strip() in {"gpu", "cuda"} and device_used != "gpu":
         warnings.append("gpu_requested_but_unavailable")
-
     img = read_image_path(image_path)
     if img is None:
         raise RuntimeError("Не удалось прочитать изображение")

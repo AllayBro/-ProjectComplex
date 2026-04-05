@@ -2,6 +2,7 @@
 #include <QWidget>
 #include <QHash>
 #include <QVariant>
+#include <QJsonObject>
 #include "AppConfig.h"
 #include "ModelTypes.h"
 
@@ -22,6 +23,8 @@ public:
 public slots:
     void onImageSelected(const QString& imagePath);
     void onResultReady(const QString& imagePath, const ModuleResult& r);
+    void setDeviceMode(const QString& mode);
+
 private slots:
     void onMarkerClicked(const QString& imagePath);
     void onMapClicked(double lat, double lon);
@@ -33,7 +36,6 @@ private slots:
     void probeNetworkNow();
     void onProbeFinished();
     void onProbeTimeout();
-
 
 private:
     enum class EditMode {
@@ -112,13 +114,11 @@ private:
     QLabel* m_netStatus = nullptr;
     QLabel* m_geoStatus = nullptr;
     QTableWidget* m_imagesTable = nullptr;
-    QLabel* m_infoPanel = nullptr;
     QPushButton* m_btnSetCameraPoint = nullptr;
     QPushButton* m_btnSetDirection = nullptr;
     QPushButton* m_btnClearGeoRef = nullptr;
 
-    QHash<QString, Item> m_items;
-    QString m_selected;
+    QString m_deviceMode = "auto";
 
     QNetworkAccessManager* m_nam = nullptr;
     QTimer* m_probeTimer = nullptr;
@@ -128,12 +128,13 @@ private:
     bool m_onlineOk = true;
     bool m_probeSeen = false;
     EditMode m_editMode = EditMode::Idle;
+    QHash<QString, Item> m_items;
+    QString m_selected;
 
     void initQml();
     void applyEffectiveModeToQml();
     void pushModelToQml();
     void selectItem(const QString& imagePath);
-    void updateInfoPanel(const Item& it);
     void refreshItemsTable();
     void updateNetLabel();
     void updateGeoStatus(const QString& text = QString());

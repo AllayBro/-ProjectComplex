@@ -13,18 +13,19 @@
 
 class RunnerClient;
 class ResultView;
-
 class ClustersTab : public QWidget {
     Q_OBJECT
 public:
     explicit ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* parent = nullptr);
     void setYoloModelPath(const QString& absPath);
+    void setDeviceMode(const QString& mode);
     QString currentImagePath() const;
-signals:
-    void imageSelected(const QString& imagePath);
+    QString currentDeviceMode() const;
+    signals:
+        void imageSelected(const QString& imagePath);
     void resultReady(const QString& imagePath, const ModuleResult& result);
     void yoloModelChanged(const QString& absPath);
-
+    void deviceModeChanged(const QString& mode);
 private:
     AppConfig m_cfg;
     QString m_appDir;

@@ -60,7 +60,37 @@ SHRINK_FRAC = 0
 # Поджатие финального бокса, чтобы убрать лишние пустоты
 model = None
 _model_key = None
+_PREDICT_DEVICE_ARG = None
 
+def _resolve_device(device_mode: str, cfg: dict):
+    mode = str(device_mode or "auto").lower().strip()
+    gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
+
+    has_cuda = False
+    if torch is not None:
+        try:
+            has_cuda = bool(torch.cuda.is_available())
+        except Exception:
+            has_cuda = False
+
+    if mode == "cpu":
+        return "cpu", "cpu"
+
+    if mode in {"gpu", "cuda"}:
+        if has_cuda:
+            return "gpu", gpu_id
+        return "cpu", "cpu"
+
+    if has_cuda:
+        return "gpu", gpu_id
+
+    return "cpu", "cpu"
+
+def _predict_device_kwargs():
+    global _PREDICT_DEVICE_ARG
+    if _PREDICT_DEVICE_ARG is None:
+        return {}
+    return {"device": _PREDICT_DEVICE_ARG}
 def _get_model(cfg: dict, device_mode: str):
     global model, _model_key
 
@@ -105,7 +135,13 @@ def load_image_from_upload():
 
 def detect_cars_full(image, conf_thres=CONF_THRES):
     """Обычное распознавание по всему изображению без тайлов."""
-    results = model.predict(image, imgsz=TILE_SIZE, conf=conf_thres, verbose=False)
+    results = model.predict(
+        image,
+        imgsz=TILE_SIZE,
+        conf=conf_thres,
+        verbose=False,
+        **_predict_device_kwargs(),
+    )
     r = results[0]
     boxes = []
 
@@ -283,7 +319,13 @@ def detect_cars_on_tiles_whole(image):
     all_boxes = []
 
     for x0, y0, tile in tiles:
-        results = model.predict(tile, imgsz=TILE_SIZE, conf=CONF_THRES, verbose=False)
+        results = model.predict(
+            tile,
+            imgsz=TILE_SIZE,
+            conf=CONF_THRES,
+            verbose=False,
+            **_predict_device_kwargs(),
+        )
         r = results[0]
         if r.boxes is None or len(r.boxes) == 0:
             continue
@@ -472,7 +514,13 @@ def refine_car_with_tiles_whole(image, base_box):
 
     # --- собираем кандидатов из тайлов в ROI ---
     for x0, y0, tile in tiles:
-        results = model.predict(tile, imgsz=TILE_SIZE, conf=CONF_THRES, verbose=False)
+        results = model.predict(
+            tile,
+            imgsz=TILE_SIZE,
+            conf=CONF_THRES,
+            verbose=False,
+            **_predict_device_kwargs(),
+        )
         r = results[0]
         if r.boxes is None or len(r.boxes) == 0:
             continue
@@ -708,18 +756,10 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     if "shrink_frac" in nb: SHRINK_FRAC = float(nb["shrink_frac"])
 
 
-    device_used = "cpu"
-    if (device_mode or "auto") != "cpu" and torch is not None:
-        try:
-            if torch.cuda.is_available():
-                gpu_id = int((cfg.get("device", {}) or {}).get("gpu_id", 0))
-                model.to(f"cuda:{gpu_id}")
-                device_used = "gpu"
-        except Exception:
-            pass
-    if (device_mode or "auto") == "gpu" and device_used != "gpu":
+    global _PREDICT_DEVICE_ARG
+    device_used, _PREDICT_DEVICE_ARG = _resolve_device(device_mode, cfg)
+    if str(device_mode or "auto").lower().strip() in {"gpu", "cuda"} and device_used != "gpu":
         warnings.append("gpu_requested_but_unavailable")
-
     fname, img = load_image_from_path(image_path)
     H, W = img.shape[:2]
 

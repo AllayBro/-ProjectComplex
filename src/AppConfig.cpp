@@ -1,7 +1,5 @@
 #include "AppConfig.h"
 
-#include <QFile>
-#include <QFileInfo>
 #include <QDebug>
 #include <QDir>
 #include <QJsonDocument>
@@ -9,6 +7,9 @@
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QRegularExpression>
 
 QString AppConfig::readAllText(const QString& path) {
     QFile f(path);
@@ -182,11 +183,144 @@ bool AppConfig::ensureYoloDirExists(const QString& appDirPath, QString* errorTex
     return false;
 }
 
+QString AppConfig::normalizeDeviceMode(const QString& deviceMode) const {
+    const QString v = deviceMode.trimmed().toLower();
+    if (v == "gpu" || v == "cpu" || v == "auto") return v;
+    return "auto";
+}
+
+bool AppConfig::isGpuAvailable(const QString& appDirPath, QString* detail) const {
+    if (detail) detail->clear();
+
+    QString pyExe = pythonExe.trimmed();
+    if (pyExe.isEmpty()) pyExe = "python";
+
+    const bool hasDirSep = pyExe.contains('/') || pyExe.contains('\\');
+    if (QFileInfo(pyExe).isAbsolute()) {
+        pyExe = QDir::cleanPath(QFileInfo(pyExe).absoluteFilePath());
+    } else if (hasDirSep) {
+        pyExe = QDir::cleanPath(QDir(appDirPath).filePath(pyExe));
+    }
+
+    static QString s_cacheKey;
+    static QString s_cacheDetail;
+    static bool s_cacheReady = false;
+    static bool s_cacheResult = false;
+
+    const QString cacheKey = QDir::cleanPath(appDirPath) + "|" + pyExe;
+    if (s_cacheReady && s_cacheKey == cacheKey) {
+        if (detail) *detail = s_cacheDetail;
+        return s_cacheResult;
+    }
+
+    auto rememberResult = [&](bool ok, const QString& info) {
+        s_cacheKey = cacheKey;
+        s_cacheDetail = info;
+        s_cacheResult = ok;
+        s_cacheReady = true;
+        if (detail) *detail = info;
+        return ok;
+    };
+
+    QProcess proc;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("PYTHONUTF8", "1");
+    env.insert("PYTHONIOENCODING", "utf-8");
+    env.insert("PYTHONFAULTHANDLER", "1");
+
+    const QFileInfo pyFi(pyExe);
+    if (pyFi.isAbsolute() && pyFi.exists() && pyFi.isFile()) {
+        env.insert("PYTHONHOME", QDir::toNativeSeparators(pyFi.absolutePath()));
+    }
+    proc.setProcessEnvironment(env);
+
+    const QString probeCode = QString::fromUtf8(R"PY(
+import json
+try:
+    import torch
+    cuda_ok = bool(torch.cuda.is_available())
+    device_count = int(torch.cuda.device_count()) if cuda_ok else 0
+    print(json.dumps({"cuda": cuda_ok, "count": device_count}, ensure_ascii=False))
+except Exception as e:
+    print(json.dumps({"cuda": False, "count": 0, "error": str(e)}, ensure_ascii=False))
+)PY").trimmed();
+
+    proc.start(pyExe, QStringList() << "-c" << probeCode);
+    if (!proc.waitForStarted(5000)) {
+        return rememberResult(false, QStringLiteral("Проверка GPU не выполнена: Python не запустился."));
+    }
+    if (!proc.waitForFinished(10000)) {
+        proc.kill();
+        proc.waitForFinished(1000);
+        return rememberResult(false, QStringLiteral("Проверка GPU не завершилась вовремя."));
+    }
+
+    const QString stdoutText = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    const QString stderrText = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+
+    QString jsonLine;
+    const QStringList lines = stdoutText.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+    if (!lines.isEmpty()) jsonLine = lines.constLast().trimmed();
+
+    if (jsonLine.isEmpty()) {
+        return rememberResult(
+            false,
+            stderrText.isEmpty()
+                ? QStringLiteral("GPU не обнаружен.")
+                : QStringLiteral("GPU не обнаружен: ") + stderrText
+        );
+    }
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonLine.toUtf8(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
+        return rememberResult(
+            false,
+            stderrText.isEmpty()
+                ? QStringLiteral("GPU не обнаружен.")
+                : QStringLiteral("GPU не обнаружен: ") + stderrText
+        );
+    }
+
+    const QJsonObject obj = doc.object();
+    const bool cudaOk = obj.value("cuda").toBool(false);
+    const int count = obj.value("count").toInt(0);
+    const QString err = obj.value("error").toString().trimmed();
+
+    if (cudaOk && count > 0) {
+        return rememberResult(true, QString("GPU доступен: %1").arg(count));
+    }
+
+    return rememberResult(
+        false,
+        err.isEmpty()
+            ? QStringLiteral("GPU не обнаружен.")
+            : QStringLiteral("GPU недоступен: ") + err
+    );
+}
+
+QString AppConfig::effectiveDeviceMode(const QString& appDirPath, const QString& requestedMode, QString* note) const {
+    if (note) note->clear();
+
+    const QString normalized = normalizeDeviceMode(requestedMode);
+    if (normalized != "gpu") return normalized;
+
+    QString gpuDetail;
+    if (isGpuAvailable(appDirPath, &gpuDetail)) return "gpu";
+
+    if (note) {
+        *note = gpuDetail.isEmpty()
+            ? "Режим gpu недоступен на этом ПК. Использую cpu."
+            : gpuDetail + " Использую cpu.";
+    }
+    return "cpu";
+}
+
 QJsonObject AppConfig::toRunConfigPatch(const QString& deviceMode) const {
     QJsonObject patch;
 
     QJsonObject dev;
-    dev.insert("device_mode", deviceMode);
+    dev.insert("device_mode", normalizeDeviceMode(deviceMode));
     dev.insert("fallback_to_cpu", true);
     patch.insert("device", dev);
 

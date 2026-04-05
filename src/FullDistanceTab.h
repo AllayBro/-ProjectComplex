@@ -18,11 +18,14 @@ class FullDistanceTab : public QWidget {
 public:
     explicit FullDistanceTab(const AppConfig& cfg, const QString& appDir, QWidget* parent = nullptr);
     void setYoloModelPath(const QString& absPath);
+    void setDeviceMode(const QString& mode);
     QString currentImagePath() const;
+    QString currentDeviceMode() const;
 signals:
     void imageSelected(const QString& imagePath);
     void resultReady(const QString& imagePath, const ModuleResult& result);
     void yoloModelChanged(const QString& absPath);
+    void deviceModeChanged(const QString& mode);
 
 private:
     AppConfig m_cfg;
