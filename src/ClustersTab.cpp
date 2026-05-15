@@ -278,7 +278,35 @@ ClustersTab::ClustersTab(const AppConfig& cfg, const QString& appDir, QWidget* p
         reloadYoloModels();
         if (m_yoloModel) {
             QSignalBlocker b(m_yoloModel);
-            m_yoloModel->setEditText(lastYolo);
+
+            const QString ydir = yoloDirAbs();
+
+            auto resolvePath = [&](const QString& value) -> QString {
+                const QString s = value.trimmed();
+                if (s.isEmpty()) return {};
+
+                QFileInfo fi(s);
+                if (fi.isAbsolute()) {
+                    return QDir::cleanPath(fi.absoluteFilePath());
+                }
+
+                if (!ydir.isEmpty()) {
+                    return QDir::cleanPath(QDir(ydir).filePath(s));
+                }
+
+                return {};
+            };
+
+            const QString savedPath = resolvePath(lastYolo);
+            const QString defaultPath = resolvePath(m_cfg.yoloModelPath);
+
+            if (!savedPath.isEmpty() && QFileInfo(savedPath).exists()) {
+                selectYoloInCombo(m_yoloModel, savedPath);
+            } else if (!defaultPath.isEmpty() && QFileInfo(defaultPath).exists()) {
+                selectYoloInCombo(m_yoloModel, defaultPath);
+            } else if (m_yoloModel->count() > 0) {
+                m_yoloModel->setCurrentIndex(0);
+            }
         }
 
         setDeviceMode(lastDevice);
@@ -465,7 +493,7 @@ QString ClustersTab::yoloDirAbs() const {
 void ClustersTab::reloadYoloModels() {
     if (!m_yoloModel) return;
 
-    const QString currentText = m_yoloModel->currentText().trimmed();
+    const QString currentPath = currentYoloModelPath();
 
     QString yoloErr;
     m_cfg.ensureYoloDirExists(m_appDir, &yoloErr);
@@ -485,35 +513,68 @@ void ClustersTab::reloadYoloModels() {
         m_yoloModel->addItem(fn, abs);
     }
 
-    if (!currentText.isEmpty()) {
-        m_yoloModel->setEditText(currentText);
+    if (!currentPath.isEmpty()) {
+        selectYoloInCombo(m_yoloModel, currentPath);
     } else if (m_yoloModel->count() > 0) {
         m_yoloModel->setCurrentIndex(0);
     }
 }
-
 QString ClustersTab::currentYoloModelPath() const {
     if (!m_yoloModel) return {};
+
+    const QString ydir = yoloDirAbs();
+
+    auto resolvePath = [&](const QString& value) -> QString {
+        const QString s = value.trimmed();
+        if (s.isEmpty()) return {};
+
+        QFileInfo fi(s);
+        if (fi.isAbsolute()) {
+            return QDir::cleanPath(fi.absoluteFilePath());
+        }
+
+        if (!ydir.isEmpty()) {
+            return QDir::cleanPath(QDir(ydir).filePath(s));
+        }
+
+        return {};
+    };
+
+    const QString text = m_yoloModel->currentText().trimmed();
+    if (!text.isEmpty()) {
+        const QString fromText = resolvePath(text);
+        const QString textName = QFileInfo(fromText.isEmpty() ? text : fromText).fileName();
+
+        for (int i = 0; i < m_yoloModel->count(); ++i) {
+            const QString itemData = QDir::cleanPath(QFileInfo(m_yoloModel->itemData(i).toString()).absoluteFilePath());
+            const QString itemText = m_yoloModel->itemText(i).trimmed();
+
+#ifdef Q_OS_WIN
+            const bool sameData = !fromText.isEmpty() && (QString::compare(itemData, fromText, Qt::CaseInsensitive) == 0);
+            const bool sameText = (QString::compare(itemText, text, Qt::CaseInsensitive) == 0);
+            const bool sameName = !textName.isEmpty() && (QString::compare(itemText, textName, Qt::CaseInsensitive) == 0);
+#else
+            const bool sameData = !fromText.isEmpty() && (itemData == fromText);
+            const bool sameText = (itemText == text);
+            const bool sameName = !textName.isEmpty() && (itemText == textName);
+#endif
+
+            if (sameData || sameText || sameName) {
+                return itemData;
+            }
+        }
+
+        if (!fromText.isEmpty()) {
+            return fromText;
+        }
+    }
 
     const QString dataPath = m_yoloModel->currentData().toString().trimmed();
     if (!dataPath.isEmpty()) {
         return QDir::cleanPath(QFileInfo(dataPath).absoluteFilePath());
     }
 
-    QString t = m_yoloModel->currentText().trimmed();
-    if (t.isEmpty()) return {};
-
-    const QString ydir = yoloDirAbs();
-    QFileInfo fi(t);
-
-    if (!fi.isAbsolute()) {
-        if (!ydir.isEmpty()) {
-            return QDir::cleanPath(QDir(ydir).filePath(t));
-        }
-        return {};
-    }
-
-    return QDir::cleanPath(fi.absoluteFilePath());
+    return {};
 }
 
 QString ClustersTab::currentImagePath() const {

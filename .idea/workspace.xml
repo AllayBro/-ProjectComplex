@@ -30,19 +30,16 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="27.03 - v0.7.1 - Full metrix map">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="05.04 - v0.7.2 - Add metric map">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/claster_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/default_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/default_config.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/AppConfig.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/AppConfig.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -144,7 +141,7 @@
     &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/AllayBro/Desktop/ProjectComplex/cmake-build-release/yolo&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/AllayBro/Desktop/ProjectComplex/py_src/notebooks&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -156,11 +153,11 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\py_src\notebooks" />
+      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\weights" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\cmake-build-release\yolo" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\assets\icons" />
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\accets\icons" />
-      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\yolo" />
-      <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\python\notebooks" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\python\full_distance" />
@@ -289,7 +286,20 @@
       <workItem from="1774529687687" duration="4327000" />
       <workItem from="1774613403635" duration="28432000" />
       <workItem from="1775036187883" duration="2794000" />
-      <workItem from="1775141506146" duration="4948000" />
+      <workItem from="1775141506146" duration="5431000" />
+      <workItem from="1775550375789" duration="18209000" />
+      <workItem from="1775626464059" duration="4021000" />
+      <workItem from="1775829349247" duration="17056000" />
+      <workItem from="1776064384624" duration="20105000" />
+      <workItem from="1776137363921" duration="875000" />
+      <workItem from="1776260736878" duration="2928000" />
+      <workItem from="1776671765522" duration="22383000" />
+      <workItem from="1777012828642" duration="15300000" />
+      <workItem from="1777633056355" duration="29000" />
+      <workItem from="1777873850483" duration="2343000" />
+      <workItem from="1777892210796" duration="552000" />
+      <workItem from="1778492448369" duration="4351000" />
+      <workItem from="1778842872690" duration="642000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -611,7 +621,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774613579432</updated>
     </task>
-    <option name="localTasksCounter" value="41" />
+    <task id="LOCAL-00041" summary="05.04 - v0.7.2 - Add metric map">
+      <option name="closed" value="true" />
+      <created>1775367133850</created>
+      <option name="number" value="00041" />
+      <option name="presentableId" value="LOCAL-00041" />
+      <option name="project" value="LOCAL" />
+      <updated>1775367133850</updated>
+    </task>
+    <option name="localTasksCounter" value="42" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -655,7 +673,8 @@
     <MESSAGE value="23.03 - v0.6.3 - Fix bug cluster mashine" />
     <MESSAGE value="23.03 - v0.7 - Add metrix" />
     <MESSAGE value="27.03 - v0.7.1 - Full metrix map" />
-    <option name="LAST_COMMIT_MESSAGE" value="27.03 - v0.7.1 - Full metrix map" />
+    <MESSAGE value="05.04 - v0.7.2 - Add metric map" />
+    <option name="LAST_COMMIT_MESSAGE" value="05.04 - v0.7.2 - Add metric map" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

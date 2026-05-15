@@ -5,36 +5,30 @@
   },
 
   "detector": {
-    "model_path": "yolov8n.pt",
+    "model_path": "yolov11n.pt",
     "imgsz": 1280,
-    "conf": 0.15,
+    "conf": 0.01,
     "iou": 0.50,
     "max_det": 300
   },
 
   "union_nms": {
     "enabled": true,
-    "iou": 0.55
-  },
-
-  "notebooks": {
-    "vehicle_detect": {
-      "model_path": "C:/Users/AllayBro/Desktop/ProjectComplex/yolo/yolo11n-visdrone.pt"
-    }
+    "iou": 0.50
   },
 
   "postprocess": {
     "enabled": true,
     "keep_classes": ["car", "truck", "bus", "van", "motorcycle"],
-    "min_conf": 0.15,
-    "min_box_px": 14,
-    "min_area_frac": 0.00002,
-    "aspect_ratio_min": 0.35,
-    "aspect_ratio_max": 4.50,
+    "min_conf": 0.01,
+    "min_box_px": 4,
+    "min_area_frac": 0.000001,
+    "aspect_ratio_min": 0.20,
+    "aspect_ratio_max": 6.00,
     "exclude_top_frac": 0.00,
     "exclude_bottom_frac": 0.00,
     "containment": {
-      "enabled": true,
+      "enabled": false,
       "cover_thr": 0.92,
       "conf_margin": 0.02
     },
@@ -45,11 +39,11 @@
   },
 
   "cluster_refine": {
-    "enabled": true,
+    "enabled": false,
     "roi_scale": 2.0,
     "roi_min_size": 640,
     "imgsz": 1280,
-    "conf": 0.15,
+    "conf": 0.01,
     "iou": 0.40,
     "max_det": 300
   },

@@ -1011,28 +1011,41 @@ QString ResultView::csvEscape(const QString& s) {
     if (needQuotes) out = '\"' + out + '\"';
     return out;
 }
-
 QStringList ResultView::buildColumns(QStringList& metaKeysOut) const {
-    QSet<QString> keys;
-    keys.reserve(64);
+    const QStringList preferredOrder = {
+        "Pos-X",
+        "Pos-Y",
+        "Pos-Z",
+        "R-img",
+        "R-pos",
+        "Rot-X",
+        "Rot-Y",
+        "Rot-Z",
+        "X-pos",
+        "Y-pos",
+        "Z-pos"
+    };
 
-    for (const auto& d : m_lastResult.detections) {
-        for (auto it = d.meta.begin(); it != d.meta.end(); ++it) {
-            const QString k = it.key();
-            if (k == "id" || k == "cls" || k == "conf" || k == "w_px" || k == "h_px") continue;
-            keys.insert(k);
+    metaKeysOut.clear();
+
+    for (const QString& key : preferredOrder) {
+        bool exists = false;
+        for (const auto& d : m_lastResult.detections) {
+            if (d.meta.contains(key)) {
+                exists = true;
+                break;
+            }
+        }
+        if (exists) {
+            metaKeysOut << key;
         }
     }
-
-    metaKeysOut = keys.values();
-    std::sort(metaKeysOut.begin(), metaKeysOut.end());
 
     QStringList cols;
     cols << "id" << "cls" << "conf" << "w_px" << "h_px";
     cols << metaKeysOut;
     return cols;
 }
-
 void ResultView::rebuildDetectionsTable() {
     if (!m_tblDetections) return;
 
@@ -1061,10 +1074,13 @@ void ResultView::rebuildDetectionsTable() {
             const QJsonValue v = d.meta.value(k);
             if (!v.isUndefined() && !v.isNull()) {
                 m_tblDetections->setItem(i, 5 + c, new QTableWidgetItem(jsonValueToText(v)));
+            } else {
+                m_tblDetections->setItem(i, 5 + c, new QTableWidgetItem(QString()));
             }
         }
     }
 
+    m_tblDetections->resizeColumnsToContents();
     m_tblDetections->setSortingEnabled(true);
 }
 void ResultView::renderResultPixmap() {
@@ -1326,7 +1342,6 @@ void ResultView::setResult(const ModuleResult& r) {
         m_log->append("detections=" + QString::number(r.detections.size()));
     }
 }
-
 QTableWidget* ResultView::makeStdTable(QWidget* parent) {
     auto* t = new CopyableTableWidget(parent);
     t->setColumnCount(0);
@@ -1335,10 +1350,14 @@ QTableWidget* ResultView::makeStdTable(QWidget* parent) {
     t->setSelectionMode(QAbstractItemView::ExtendedSelection);
     t->setSelectionBehavior(QAbstractItemView::SelectRows);
     t->setSortingEnabled(true);
+
     t->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     t->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    t->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    t->horizontalHeader()->setStretchLastSection(true);
+    t->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    t->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+
+    t->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    t->horizontalHeader()->setStretchLastSection(false);
 
     t->setDragEnabled(false);
     t->viewport()->setAcceptDrops(false);
@@ -1348,7 +1367,6 @@ QTableWidget* ResultView::makeStdTable(QWidget* parent) {
 
     return t;
 }
-
 void ResultView::applyScaledToTarget(QLabel* lbl,
                                     const QPixmap& src,
                                     quint64& lastKey,
@@ -1416,7 +1434,6 @@ static QStringList parseCsvLine(const QString& line) {
     out << cur;
     return out;
 }
-
 bool ResultView::loadCsvToTable(const QString& path, QTableWidget* t, QString& err) {
     if (!t) { err = "Null table"; return false; }
 
@@ -1454,10 +1471,10 @@ bool ResultView::loadCsvToTable(const QString& path, QTableWidget* t, QString& e
         }
     }
 
+    t->resizeColumnsToContents();
     t->setSortingEnabled(true);
     return true;
 }
-
 QTableWidget* ResultView::buildKvTableFromObject(const QJsonObject& obj, QWidget* parent) {
     auto* t = makeStdTable(parent);
     t->setSortingEnabled(false);
@@ -1653,17 +1670,40 @@ void ResultView::rebuildExtraTablesTabs() {
         const QString name = e.value("name").toString().trimmed();
         const QString titleIn = e.value("title").toString().trimmed();
 
+        const QString typeLow = type.toLower();
         const QString nameLow = name.toLower();
         const QString titleLow = titleIn.toLower();
 
-        const bool looksExif = (type == "exif") || (nameLow == "exif") || (titleLow == "exif") || (titleLow == "exif table");
+        const bool looksExif =
+            (typeLow == "exif") ||
+            (nameLow == "exif") ||
+            (titleLow == "exif") ||
+            (titleLow == "exif table");
+
         if (looksExif) continue;
+
+        const bool looksDuplicateDetections =
+            (typeLow == "detections") ||
+            (nameLow == "detections") ||
+            (nameLow == "detection") ||
+            (titleLow == "detections") ||
+            (titleLow == "detection") ||
+            (titleLow == "table") ||
+            (titleLow == "detections table");
+
+        if (looksDuplicateDetections) continue;
 
         QString title;
         QString err;
         QWidget* w = buildTableWidgetFromEntry(e, title, err);
         if (!w) {
             if (m_log) m_log->append("TABLE SKIP: " + title + " (" + err + ")");
+            continue;
+        }
+
+        const QString finalTitleLow = title.toLower().trimmed();
+        if (finalTitleLow == "detections" || finalTitleLow == "detection" || finalTitleLow == "table") {
+            w->deleteLater();
             continue;
         }
 

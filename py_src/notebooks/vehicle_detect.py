@@ -77,10 +77,10 @@ CFG = {
 
     "VAL_PCT": 15,
 
-    "DET_CONF": 0.01,
-    "DET_IOU": 0.5,
-    "DET_MAX_DET": 300,
-    "DET_NMS_THR": 0.5,
+    "DET_CONF": 0.001,
+    "DET_IOU": 0.9,
+    "DET_MAX_DET": 3000,
+    "DET_NMS_THR": 0.95,
 
     "MAX_CROPS_PER_IMAGE": None,
 
@@ -101,16 +101,19 @@ PRED_DEVICE = pick_device(prefer_gpu=True)
 CLS_DEVICE  = pick_device(prefer_gpu=True)
 
 log(f"PRED_DEVICE={PRED_DEVICE}, CLS_DEVICE={CLS_DEVICE}")
-                                        # yolo11x-visdrone.pt")
-                                        # yolo11s-visdrone.pt")
+# yolo11x-visdrone.pt")
+# yolo11s-visdrone.pt")
 HF_URL = "https://huggingface.co/erbayat/yolov11x-visdrone/resolve/main/yolo11x-visdrone.pt"
 def _normalized_vehicle_class(cls_name):
     cls = str(cls_name or "").strip().lower()
-    if cls == "van":
+
+    if cls in {"van", "auto", "automobile", "vehicle"}:
         return "car"
+
+    if cls in {"motor", "motorbike", "motorcycle"}:
+        return "motorcycle"
+
     return cls
-
-
 def _vehicle_color_bgr(cls_name):
     cls = _normalized_vehicle_class(cls_name)
     if cls == "truck":
@@ -154,6 +157,66 @@ def _box_cls_id(b):
         except Exception:
             return None
     return None
+
+def _safe_xyxy_int(x1, y1, x2, y2, W, H):
+    if W <= 1 or H <= 1:
+        return 0, 0, 0, 0
+
+    x1f = float(min(x1, x2))
+    y1f = float(min(y1, y2))
+    x2f = float(max(x1, x2))
+    y2f = float(max(y1, y2))
+
+    ix1 = int(np.floor(x1f))
+    iy1 = int(np.floor(y1f))
+    ix2 = int(np.ceil(x2f))
+    iy2 = int(np.ceil(y2f))
+
+    ix1 = max(0, min(ix1, W - 1))
+    iy1 = max(0, min(iy1, H - 1))
+    ix2 = max(0, min(ix2, W - 1))
+    iy2 = max(0, min(iy2, H - 1))
+
+    if ix2 <= ix1:
+        if ix1 < W - 1:
+            ix2 = ix1 + 1
+        else:
+            ix1 = max(0, ix1 - 1)
+
+    if iy2 <= iy1:
+        if iy1 < H - 1:
+            iy2 = iy1 + 1
+        else:
+            iy1 = max(0, iy1 - 1)
+
+    return ix1, iy1, ix2, iy2
+
+def _draw_box_for_tiny_object(img, x1, y1, x2, y2, label, color, min_draw_px=10):
+    H, W = img.shape[:2]
+
+    w = max(1, int(x2) - int(x1))
+    h = max(1, int(y2) - int(y1))
+
+    if w >= min_draw_px and h >= min_draw_px:
+        _draw_box_and_label(img, x1, y1, x2, y2, label, color)
+        return
+
+    cx = 0.5 * (int(x1) + int(x2))
+    cy = 0.5 * (int(y1) + int(y2))
+
+    half = int(round(min_draw_px / 2))
+
+    dx1 = max(0, int(round(cx)) - half)
+    dy1 = max(0, int(round(cy)) - half)
+    dx2 = min(W - 1, int(round(cx)) + half)
+    dy2 = min(H - 1, int(round(cy)) + half)
+
+    if dx2 <= dx1:
+        dx2 = min(W - 1, dx1 + 1)
+    if dy2 <= dy1:
+        dy2 = min(H - 1, dy1 + 1)
+
+    _draw_box_and_label(img, dx1, dy1, dx2, dy2, label, color)
 
 def _hf_default_cache_dir() -> Path:
     # Кроссплатформенный кэш: Windows/Linux
@@ -305,21 +368,103 @@ def iou_xyxy(a, b):
     return inter / (au + bu - inter + 1e-6)
 
 def nms_union(boxes, thr=0.5):
-    boxes = sorted(boxes, key=lambda x: x[4], reverse=True)
-    kept = []
-    for b in boxes:
-        drop = False
-        for k in kept:
-            cls_b = _box_cls_id(b)
-            cls_k = _box_cls_id(k)
-            if cls_b is not None and cls_k is not None and cls_b != cls_k:
+    if not boxes:
+        return []
+
+    max_input = int(CFG.get("NMS_MAX_INPUT", 6000))
+    if len(boxes) > max_input:
+        boxes = sorted(boxes, key=lambda x: float(x[4]), reverse=True)[:max_input]
+
+    try:
+        by_cls = {}
+        for b in boxes:
+            cls_id = _box_cls_id(b)
+            by_cls.setdefault(cls_id, []).append(b)
+
+        kept = []
+        for cls_boxes in by_cls.values():
+            rects = []
+            scores = []
+            for b in cls_boxes:
+                x1, y1, x2, y2, c = b[:5]
+                w = max(1, int(x2) - int(x1))
+                h = max(1, int(y2) - int(y1))
+                rects.append([int(x1), int(y1), w, h])
+                scores.append(float(c))
+
+            idxs = cv2.dnn.NMSBoxes(rects, scores, score_threshold=0.0, nms_threshold=float(thr))
+            if idxs is None or len(idxs) == 0:
                 continue
-            if iou_xyxy(b[:4], k[:4]) > thr:
-                drop = True
-                break
-        if not drop:
-            kept.append(b)
-    return kept
+
+            for i in np.array(idxs).reshape(-1).tolist():
+                kept.append(cls_boxes[int(i)])
+
+        kept.sort(key=lambda x: float(x[4]), reverse=True)
+        return kept
+    except Exception:
+        boxes = sorted(boxes, key=lambda x: x[4], reverse=True)
+        kept = []
+        for b in boxes:
+            drop = False
+            for k in kept:
+                cls_b = _box_cls_id(b)
+                cls_k = _box_cls_id(k)
+                if cls_b is not None and cls_k is not None and cls_b != cls_k:
+                    continue
+                if iou_xyxy(b[:4], k[:4]) > thr:
+                    drop = True
+                    break
+            if not drop:
+                kept.append(b)
+        return kept
+
+def refine_boxes_by_vote(kept_boxes, source_boxes, vote_iou=0.35):
+    if not kept_boxes or not source_boxes:
+        return kept_boxes
+
+    out = []
+    for kb in kept_boxes:
+        kx1, ky1, kx2, ky2, kc = kb[:5]
+        ktail = tuple(kb[5:])
+        kcls = _box_cls_id(kb)
+
+        sx1 = float(kx1) * float(max(kc, 1e-6))
+        sy1 = float(ky1) * float(max(kc, 1e-6))
+        sx2 = float(kx2) * float(max(kc, 1e-6))
+        sy2 = float(ky2) * float(max(kc, 1e-6))
+        sw = float(max(kc, 1e-6))
+        best_c = float(kc)
+
+        for sb in source_boxes:
+            scls = _box_cls_id(sb)
+            if kcls is not None and scls is not None and kcls != scls:
+                continue
+            if iou_xyxy(kb[:4], sb[:4]) < float(vote_iou):
+                continue
+
+            sc = float(sb[4])
+            bx1, by1, bx2, by2 = sb[:4]
+            w = max(sc, 1e-6)
+            sx1 += float(bx1) * w
+            sy1 += float(by1) * w
+            sx2 += float(bx2) * w
+            sy2 += float(by2) * w
+            sw += w
+            if sc > best_c:
+                best_c = sc
+
+        if sw > 0.0:
+            rx1 = int(round(sx1 / sw))
+            ry1 = int(round(sy1 / sw))
+            rx2 = int(round(sx2 / sw))
+            ry2 = int(round(sy2 / sw))
+        else:
+            rx1, ry1, rx2, ry2 = int(kx1), int(ky1), int(kx2), int(ky2)
+
+        out.append((rx1, ry1, rx2, ry2, float(best_c), *ktail))
+
+    out.sort(key=lambda x: float(x[4]), reverse=True)
+    return out
 
 def _vk_expand_xyxy(x1, y1, x2, y2, frac, W, H):
     w = max(1.0, float(x2) - float(x1))
@@ -499,12 +644,29 @@ def ensure_cls_dirs(root: Path):
 def get_keep_class_ids(model, keep_names: set[str] | None):
     if keep_names is None:
         return None
+
+    keep_norm = {_normalized_vehicle_class(str(x).strip().lower()) for x in keep_names if str(x).strip()}
     names = model.names
+
+    ids = []
+
     if isinstance(names, dict):
-        return sorted([i for i, n in names.items() if n in keep_names])
-    return sorted([i for i, n in enumerate(names) if n in keep_names])
+        for i, n in names.items():
+            raw = str(n).strip().lower()
+            norm = _normalized_vehicle_class(raw)
+            if raw in keep_norm or norm in keep_norm:
+                ids.append(int(i))
+    else:
+        for i, n in enumerate(names):
+            raw = str(n).strip().lower()
+            norm = _normalized_vehicle_class(raw)
+            if raw in keep_norm or norm in keep_norm:
+                ids.append(int(i))
+
+    return sorted(ids)
 
 _DET_MODEL = None
+_DET_MODEL_PATH = None
 
 def resolve_model_path() -> Path:
     candidates = []
@@ -552,20 +714,28 @@ def resolve_model_path() -> Path:
 
 
 def get_det_model():
-    global _DET_MODEL
-    if _DET_MODEL is None:
-        mp = resolve_model_path()
+    global _DET_MODEL, _DET_MODEL_PATH
+
+    mp = resolve_model_path()
+    mp_str = str(mp)
+
+    if _DET_MODEL is None or _DET_MODEL_PATH != mp_str:
         log(f"loading det model: {mp}")
-        _DET_MODEL = YOLO(str(mp))
+        _DET_MODEL = YOLO(mp_str)
+        _DET_MODEL_PATH = mp_str
+
     return _DET_MODEL
 
 def predict_boxes(model, img_bgr, conf, iou, imgsz, max_det, keep_ids=None):
+    H, W = img_bgr.shape[:2]
+
     r = model.predict(
         img_bgr,
-        conf=conf,
-        iou=iou,
-        imgsz=imgsz,
-        max_det=max_det,
+        conf=float(conf),
+        iou=float(iou),
+        imgsz=int(imgsz),
+        max_det=int(max_det),
+        classes=list(keep_ids) if keep_ids is not None else None,
         device=PRED_DEVICE,
         verbose=False
     )[0]
@@ -581,8 +751,13 @@ def predict_boxes(model, img_bgr, conf, iou, imgsz, max_det, keep_ids=None):
         cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
         cls_name = _normalized_vehicle_class(cls_name)
 
-        x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-        out.append((int(x1), int(y1), int(x2), int(y2), float(b.conf.item()), int(cls_id), str(cls_name)))
+        x1, y1, x2, y2 = b.xyxy[0].detach().cpu().numpy().tolist()
+        x1, y1, x2, y2 = _safe_xyxy_int(x1, y1, x2, y2, W, H)
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        out.append((x1, y1, x2, y2, float(b.conf.item()), int(cls_id), str(cls_name)))
 
     return out
 
@@ -648,6 +823,7 @@ def detect_tiled_fast(model, img_bgr,
             iou=iou,
             imgsz=imgsz,
             max_det=max_det,
+            classes=list(keep_ids) if keep_ids is not None else None,
             device=PRED_DEVICE,
             verbose=False
         )
@@ -660,927 +836,276 @@ def detect_tiled_fast(model, img_bgr,
                 cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
                 cls_name = _normalized_vehicle_class(cls_name)
 
-                x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
+                x1, y1, x2, y2 = b.xyxy[0].detach().cpu().numpy().tolist()
+                x1, y1, x2, y2 = _safe_xyxy_int(x1, y1, x2, y2, tile, tile)
+
                 all_boxes.append(
-                    (int(x1) + tx, int(y1) + ty, int(x2) + tx, int(y2) + ty, float(b.conf.item()), int(cls_id), str(cls_name))
+                    (x1 + tx, y1 + ty, x2 + tx, y2 + ty, float(b.conf.item()), int(cls_id), str(cls_name))
                 )
 
     return nms_union(all_boxes, thr=nms_thr)
 
 def detect_tiled(model, img_bgr, **kwargs):
     return detect_tiled_fast(model, img_bgr, **kwargs)
-if __name__ == "__main__":
-    init_data()
 
-if __name__ == "__main__":
-    det = get_det_model()
-    keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
+def _select_informative_offsets(img_bgr, tile, overlap, keep_ratio=0.35, max_tiles=220, min_tiles=24):
+    H, W = img_bgr.shape[:2]
+    tile = max(8, min(int(tile), H, W))
+    stride = max(1, int(tile * (1 - float(overlap))))
 
-    log(f"model.names = {det.names}")
-    log(f"KEEP_CLASS_IDS = {keep_ids}")
+    xs = list(range(0, max(1, W - tile + 1), stride))
+    ys = list(range(0, max(1, H - tile + 1), stride))
+    if W >= tile and xs and xs[-1] != W - tile:
+        xs.append(W - tile)
+    if H >= tile and ys and ys[-1] != H - tile:
+        ys.append(H - tile)
+    xs = sorted(set(max(0, min(x, max(0, W - tile))) for x in xs))
+    ys = sorted(set(max(0, min(y, max(0, H - tile))) for y in ys))
 
-    reset_dir(DET_ROOT)
-    ensure_det_dirs(DET_ROOT)
+    if not xs or not ys:
+        return [(0, 0)]
 
-    def xyxy_to_yolo_line(x1, y1, x2, y2, tile_size: int):
-        w = x2 - x1
-        h = y2 - y1
-        xc = x1 + w / 2
-        yc = y1 + h / 2
-        return f"0 {xc/tile_size:.6f} {yc/tile_size:.6f} {w/tile_size:.6f} {h/tile_size:.6f}"
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_16S, ksize=3)
+    lap_abs = cv2.convertScaleAbs(lap)
+    integ = cv2.integral(lap_abs, sdepth=cv2.CV_64F)
 
-    def clip_to_tile(gx1, gy1, gx2, gy2, tx, ty, tile_size: int):
-        x1 = max(gx1, tx)
-        y1 = max(gy1, ty)
-        x2 = min(gx2, tx + tile_size)
-        y2 = min(gy2, ty + tile_size)
-        if x2 <= x1 or y2 <= y1:
-            return None
-        return (x1 - tx, y1 - ty, x2 - tx, y2 - ty)
+    scored = []
+    for ty in ys:
+        y2 = ty + tile
+        for tx in xs:
+            x2 = tx + tile
+            s = integ[y2, x2] - integ[ty, x2] - integ[y2, tx] + integ[ty, tx]
+            scored.append((float(s), tx, ty))
 
-    def crop_tile_center(img, cx, cy, tile_size: int):
-        H, W = img.shape[:2]
-        x1 = int(cx - tile_size / 2)
-        y1 = int(cy - tile_size / 2)
-        x2 = x1 + tile_size
-        y2 = y1 + tile_size
+    scored.sort(key=lambda t: t[0], reverse=True)
+    total = len(scored)
+    k = int(round(total * float(keep_ratio)))
+    k = max(int(min_tiles), k)
+    k = min(total, int(max_tiles), k)
+    return [(tx, ty) for _, tx, ty in scored[:k]]
 
-        if x1 < 0:
-            x2 -= x1
-            x1 = 0
-        if y1 < 0:
-            y2 -= y1
-            y1 = 0
-        if x2 > W:
-            x1 -= (x2 - W)
-            x2 = W
-        if y2 > H:
-            y1 -= (y2 - H)
-            y2 = H
+def _detect_distant_roi_boxes(model, img_bgr, conf, iou, imgsz, max_det, nms_thr, batch, keep_ids=None):
+    H, W = img_bgr.shape[:2]
+    if H <= 2 or W <= 2:
+        return []
 
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        if (x2 - x1) != tile_size or (y2 - y1) != tile_size:
-            return None
-        return x1, y1, x2, y2
+    # Дальний план обычно в верхней части кадра и ближе к центральной перспективе дороги.
+    y_end_frac = float(CFG.get("DISTANT_ROI_Y_END_FRAC", 0.50))
+    x_l_frac = float(CFG.get("DISTANT_ROI_X_LEFT_FRAC", 0.10))
+    x_r_frac = float(CFG.get("DISTANT_ROI_X_RIGHT_FRAC", 0.90))
+    d_overlap = float(CFG.get("DISTANT_OVERLAP", 0.35))
+    d_tiles = CFG.get("DISTANT_TILE_SIZES", [192, 128, 96, 64])
+    d_scales = CFG.get("DISTANT_UPSCALE_FACTORS", [1.0, 2.0])
+    d_keep_ratio = float(CFG.get("DISTANT_TILE_KEEP_RATIO", 0.35))
+    d_max_tiles = int(CFG.get("DISTANT_MAX_TILES", 220))
+    d_min_tiles = int(CFG.get("DISTANT_MIN_TILES", 24))
 
-    def export_det_list(det_model, paths, out_root: Path, split: str):
-        img_out = out_root / split / "images"
-        lab_out = out_root / split / "labels"
-        img_out.mkdir(parents=True, exist_ok=True)
-        lab_out.mkdir(parents=True, exist_ok=True)
+    y0 = 0
+    y1 = int(round(max(0.05, min(0.95, y_end_frac)) * H))
+    x0 = int(round(max(0.0, min(0.8, x_l_frac)) * W))
+    x1 = int(round(max(0.2, min(1.0, x_r_frac)) * W))
 
-        max_crops = CFG["MAX_CROPS_PER_IMAGE"]
-        t_all = time.perf_counter()
+    y1 = max(y0 + 2, min(H, y1))
+    x1 = max(x0 + 2, min(W, x1))
 
-        for idx, ip in enumerate(paths, 1):
-            t0 = time.perf_counter()
-            img = read_image_path(ip)
+    roi = img_bgr[y0:y1, x0:x1]
+    if roi.size == 0:
+        return []
 
-            boxes = predict_boxes(
-                det_model, img,
-                conf=float(CFG["DET_CONF"]),
-                iou=float(CFG["DET_IOU"]),
-                imgsz=int(BASE_IMGSZ),
-                max_det=int(CFG["DET_MAX_DET"]),
-                keep_ids=keep_ids
+    out = []
+    names = model.names
+    for sc in d_scales:
+        try:
+            scale = float(sc)
+        except Exception:
+            continue
+        if scale < 1.0:
+            continue
+
+        if scale > 1.001:
+            sw = max(2, int(round(roi.shape[1] * scale)))
+            sh = max(2, int(round(roi.shape[0] * scale)))
+            roi_s = cv2.resize(roi, (sw, sh), interpolation=cv2.INTER_CUBIC)
+        else:
+            roi_s = roi
+
+        used = set()
+        for tv in d_tiles:
+            try:
+                tile = int(tv)
+            except Exception:
+                continue
+            if tile <= 0:
+                continue
+
+            tile_s = max(64, int(round(tile * scale)))
+            tile_s = max(64, min(tile_s, roi_s.shape[0], roi_s.shape[1]))
+            if tile_s in used:
+                continue
+            used.add(tile_s)
+
+            offs = _select_informative_offsets(
+                roi_s,
+                tile=tile_s,
+                overlap=d_overlap,
+                keep_ratio=d_keep_ratio,
+                max_tiles=d_max_tiles,
+                min_tiles=d_min_tiles
             )
+            if not offs:
+                continue
 
-            boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
-            boxes = filter_boxes_geom(boxes, cfg=None)
+            boxes_roi = []
+            for i0 in range(0, len(offs), batch):
+                chunk_offs = offs[i0:i0 + batch]
+                chunk = [roi_s[ty:ty + tile_s, tx:tx + tile_s] for (tx, ty) in chunk_offs]
+                rs = model.predict(
+                    chunk,
+                    conf=conf,
+                    iou=iou,
+                    imgsz=imgsz,
+                    max_det=max_det,
+                    classes=list(keep_ids) if keep_ids is not None else None,
+                    device=PRED_DEVICE,
+                    verbose=False
+                )
+                for r, (tx, ty) in zip(rs, chunk_offs):
+                    for b in r.boxes:
+                        cls_id = int(b.cls.item())
+                        if keep_ids is not None and cls_id not in keep_ids:
+                            continue
+                        cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
+                        cls_name = _normalized_vehicle_class(cls_name)
+                        bx1, by1, bx2, by2 = b.xyxy[0].detach().cpu().numpy().tolist()
+                        bx1, by1, bx2, by2 = _safe_xyxy_int(bx1, by1, bx2, by2, tile_s, tile_s)
+                        boxes_roi.append((bx1 + tx, by1 + ty, bx2 + tx, by2 + ty, float(b.conf.item()), int(cls_id), str(cls_name)))
 
-            cand = []
-            for (x1, y1, x2, y2, c) in boxes:
-                cx = (x1 + x2) / 2
-                cy = (y1 + y2) / 2
-                cand.append((c, cx, cy))
-            cand.sort(reverse=True, key=lambda t: t[0])
-            if isinstance(max_crops, int):
-                cand = cand[:max_crops]
+            for b in boxes_roi:
+                x1b, y1b, x2b, y2b, c = b[:5]
+                tail = tuple(b[5:])
+                if scale > 1.001:
+                    x1b /= scale
+                    y1b /= scale
+                    x2b /= scale
+                    y2b /= scale
+                out.append((int(x1b) + x0, int(y1b) + y0, int(x2b) + x0, int(y2b) + y0, float(c), *tail))
 
-            saved = 0
-            for k, (c, cx, cy) in enumerate(cand):
-                tile_rect = crop_tile_center(img, cx, cy, int(TILE))
-                if tile_rect is None:
-                    continue
+    return nms_union(out, thr=nms_thr)
 
-                tx1, ty1, tx2, ty2 = tile_rect
-                tile_img = img[ty1:ty2, tx1:tx2]
+def detect_vehicle_candidates_max_recall(model, img_bgr, keep_ids=None, use_tiles=True):
+    H, W = img_bgr.shape[:2]
 
-                lines = []
-                for (x1, y1, x2, y2, _) in boxes:
-                    cb = clip_to_tile(x1, y1, x2, y2, tx1, ty1, int(TILE))
-                    if cb is None:
-                        continue
-                    x1t, y1t, x2t, y2t = cb
-                    if (x2t - x1t) < 2 or (y2t - y1t) < 2:
-                        continue
-                    lines.append(xyxy_to_yolo_line(x1t, y1t, x2t, y2t, int(TILE)))
+    conf = float(CFG["DET_CONF"])
+    iou = float(CFG["DET_IOU"])
+    imgsz = int(TILED_IMGSZ)
+    max_det = int(CFG["DET_MAX_DET"])
+    nms_thr = float(CFG["DET_NMS_THR"])
+    batch = int(CFG["TILED_BATCH"])
+    overlap = float(OVERLAP)
 
-                if not lines:
-                    continue
+    all_boxes = []
 
-                stem = f"{Path(ip).stem}_c{k}_x{tx1}_y{ty1}"
-                cv2.imwrite(str(img_out / f"{stem}.jpg"), tile_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                (lab_out / f"{stem}.txt").write_text("\n".join(lines), encoding="utf-8")
-                saved += 1
-
-            dt = time.perf_counter() - t0
-            avg = (time.perf_counter() - t_all) / idx
-            eta = avg * (len(paths) - idx)
-            log(f"det_export {split}: {idx}/{len(paths)} saved={saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
-
-    export_det_list(det, train_imgs, DET_ROOT, "train")
-    export_det_list(det, val_imgs,   DET_ROOT, "val")
-
-    (Path(DET_ROOT) / "data.yaml").write_text(
-    f"""path: {DET_ROOT}
-    train: train/images
-    val: val/images
-    names: ["car"]
-    """,
-    encoding="utf-8"
+    full_boxes = predict_boxes(
+        model,
+        img_bgr,
+        conf=conf,
+        iou=iou,
+        imgsz=imgsz,
+        max_det=max_det,
+        keep_ids=keep_ids
     )
+    all_boxes.extend(full_boxes)
 
-    log(f"DET tiles train={len(list((DET_ROOT/'train/images').glob('*.jpg')))} "
-        f"val={len(list((DET_ROOT/'val/images').glob('*.jpg')))}")
+    tiled_total = 0
 
-    # 3
-    from pathlib import Path
-    from ultralytics import YOLO
-    from IPython.display import Image as IPImage, display  # <-- важно: не конфликтует с PIL.Image
+    if use_tiles:
+        tile_sizes = CFG.get("TILE_SIZES", [640, 320, 256])
+        used = set()
 
-    MODEL_PATH = "/content/drive/MyDrive/DRONE/data_det/yolo11x-visdrone.pt"
-    assert Path(MODEL_PATH).exists(), f"Не найден вес: {MODEL_PATH}"
-
-    # Режим: используем готовый вес, обучение НЕ запускаем
-    SKIP_TRAINING = True
-
-    def build_det_model_auto(*args, **kwargs):
-        # совместимость с вашим кодом: кто вызывает build_det_model_auto — получит модель
-        return YOLO(MODEL_PATH)
-
-    # det_run бывает только после train(); в режиме без обучения его нет
-    det_run = None
-
-    if det_run is None:
-        print("DET: обучение пропущено — графиков нет (используется готовый вес).")
-    else:
-        p = det_run / "results.png"
-        if p.exists():
-            display(IPImage(filename=str(p)))
-        else:
-            print("DET: results.png не найден")
-
-        for name in ["confusion_matrix.png", "PR_curve.png", "P_curve.png", "R_curve.png", "F1_curve.png"]:
-            fp = det_run / name
-            if fp.exists():
-                display(IPImage(filename=str(fp)))
-    if __name__ == "__main__":
-        init_data()
-
-    det = get_det_model()
-    keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
-
-    up = files.upload()
-
-    for fn, data in up.items():
-        img = read_image_auto(data)
-
-        boxes = detect_tiled(
-            det, img,
-            conf=float(CFG["DET_CONF"]),
-            iou=float(CFG["DET_IOU"]),
-            imgsz=int(TILED_IMGSZ),
-            max_det=int(CFG["DET_MAX_DET"]),
-            nms_thr=float(CFG["DET_NMS_THR"]),
-            tile=int(TILE),
-            overlap=float(OVERLAP),
-            batch=int(CFG["TILED_BATCH"]),
-            keep_ids=keep_ids
-        )
-
-        vis = img.copy()
-        rows = []
-        for i, (x1, y1, x2, y2, c) in enumerate(boxes, 1):
-            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(vis, f"#{i} {c:.2f}", (x1, max(0, y1-6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-            rows.append({"id": i, "bbox": [x1, y1, x2, y2], "conf": round(float(c), 3)})
-
-        plt.figure(figsize=(80, 48))
-        plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-        plt.axis("off")
-        plt.show()
-
-        print(json.dumps(rows, ensure_ascii=False, indent=2))
-
-    # 6
-    from pathlib import Path
-
-    det_run = Path(RUNS) / "det_car_tiled"
-
-    def explain_det_results(det_run: Path):
-        print("Проверка каталога:", det_run)
-
-        if not det_run.exists():
-            print("Каталог det_car_tiled не существует.")
-            print("Причина: обучение детектора не запускалось или использован другой project/name.")
-            return
-
-        files = list(det_run.iterdir())
-        if not files:
-            print("Каталог существует, но пуст.")
-            print("Причина: обучение не стартовало или завершилось до записи результатов.")
-            return
-
-        has_results = (det_run / "results.png").exists()
-        has_weights = (det_run / "weights").exists()
-        has_train_logs = any(f.name.startswith("events.out.tfevents") for f in files)
-
-        if not has_results:
-            print("Файл results.png отсутствует.")
-
-            if not has_weights:
-                print("Причина: команда yolo detect train не выполнялась.")
-                return
-
-            if has_weights and not has_train_logs:
-                print("Причина: обучение было прервано до первой эпохи.")
-                return
-
-            if has_weights and has_train_logs:
-                print("Причина: обучение завершилось, но графики не были сохранены.")
-                print("Возможные условия:")
-                print("- обучение шло с very small epochs")
-                print("- training был в другом каталоге runs")
-                print("- версия Ultralytics не сохранила results.png")
-                return
-
-        print("results.png найден.")
-
-        curves = [
-            "confusion_matrix.png",
-            "PR_curve.png",
-            "P_curve.png",
-            "R_curve.png",
-            "F1_curve.png"
-        ]
-
-        any_curve = False
-        for name in curves:
-            if (det_run / name).exists():
-                any_curve = True
-
-        if not any_curve:
-            print("Графики PR/Recall/F1 отсутствуют.")
-            print("Причина: Ultralytics не строил дополнительные кривые для данного запуска.")
-        else:
-            print("Дополнительные графики присутствуют.")
-
-    explain_det_results(det_run)
-
-    def sync_artifacts_to_drive(overwrite_runs: bool = True,
-                                overwrite_det: bool = False,
-                                overwrite_cls: bool = False,
-                                make_backup: bool = True):
-        src_runs = RUNS
-        src_det  = DET_ROOT
-        src_cls  = CLS_ROOT
-
-        dst_runs = DRONE / "runs"
-        dst_det  = DRONE / "artifacts_data_det"
-        dst_cls  = DRONE / "artifacts_data_cls"
-
-        pairs = [
-            ("runs", src_runs, dst_runs, overwrite_runs),
-            ("det",  src_det,  dst_det,  overwrite_det),
-            ("cls",  src_cls,  dst_cls,  overwrite_cls),
-        ]
-
-        for tag, src, dst, ow in pairs:
-            if not src.exists():
-                log(f"Пропуск: источника нет: {src}")
+        for tile_value in tile_sizes:
+            try:
+                tile = int(tile_value)
+            except Exception:
                 continue
 
-            if dst.exists() and not ow:
-                log(f"Пропуск: назначение уже есть: {dst}")
+            if tile <= 0:
                 continue
 
-            if dst.exists() and ow:
-                if make_backup:
-                    _backup_dir(dst)
-                else:
-                    shutil.rmtree(dst)
+            tile = max(64, min(tile, H, W))
 
-            log(f"sync start [{tag}]: {src} -> {dst}")
-            shutil.copytree(src, dst)
-            log(f"sync done  [{tag}]: {src} -> {dst}")
-    print("ok")
+            if tile in used:
+                continue
 
-    # 8
-    def ensure_cls_dirs(root):
-        for p in ["train/car","train/bg","val/car","val/bg"]:
-            Path(root, p).mkdir(parents=True, exist_ok=True)
+            used.add(tile)
 
-    def crop_with_pad(img, x1, y1, x2, y2, pad=0.8):
-        H, W = img.shape[:2]
-        w = x2 - x1
-        h = y2 - y1
-        cx = (x1 + x2) / 2
-        cy = (y1 + y2) / 2
-        nw = w * (1 + pad)
-        nh = h * (1 + pad)
-
-        rx1 = int(max(0, cx - nw / 2))
-        ry1 = int(max(0, cy - nh / 2))
-        rx2 = int(min(W, cx + nw / 2))
-        ry2 = int(min(H, cy + nh / 2))
-
-        if rx2 <= rx1 or ry2 <= ry1:
-            return None
-        return img[ry1:ry2, rx1:rx2]
-
-    # 10
-    log(f"train_imgs={len(train_imgs)} val_imgs={len(val_imgs)}")
-
-    if len(train_imgs) == 0:
-        log("train sample: EMPTY")
-    else:
-        log(f"train sample: {train_imgs[0]}")
-
-    if len(val_imgs) == 0:
-        log("val   sample: EMPTY")
-    else:
-        log(f"val   sample: {val_imgs[0]}")
-
-    def export_cls_list(det_model, paths, out_root: Path, split: str,
-                        pos_conf=0.25, max_pos=None, max_bg=None):
-        out_car = Path(out_root, split, "car")
-        out_bg  = Path(out_root, split, "bg")
-        out_car.mkdir(parents=True, exist_ok=True)
-        out_bg.mkdir(parents=True, exist_ok=True)
-
-        BG_SIZE = 320
-        STEP = 320
-        BG_IOU_THR = 0.05
-
-        keep_ids = get_keep_class_ids(det_model, CFG["KEEP_CLASS_NAMES"])
-        t_all = time.perf_counter()
-
-        for idx, ip in enumerate(paths, 1):
-            t0 = time.perf_counter()
-            img = read_image_path(ip)
-
-            boxes = predict_boxes(
-                det_model, img,
-                conf=float(CFG["DET_CONF"]),
-                iou=float(CFG["DET_IOU"]),
-                imgsz=int(BASE_IMGSZ),
-                max_det=int(CFG["DET_MAX_DET"]),
+            tiled_boxes = detect_tiled(
+                model,
+                img_bgr,
+                conf=conf,
+                iou=iou,
+                imgsz=imgsz,
+                max_det=max_det,
+                nms_thr=nms_thr,
+                tile=tile,
+                overlap=overlap,
+                batch=batch,
                 keep_ids=keep_ids
             )
 
-            boxes = nms_union(boxes, thr=float(CFG["DET_NMS_THR"]))
-            boxes = filter_boxes_geom(boxes, cfg=None)
-
-            pos = [(x1, y1, x2, y2, c) for (x1, y1, x2, y2, c) in boxes if c >= pos_conf]
-            pos.sort(key=lambda b: b[4], reverse=True)
-            if isinstance(max_pos, int):
-                pos = pos[:max_pos]
-
-            pos_xyxy = [(x1, y1, x2, y2) for (x1, y1, x2, y2, _) in pos]
-            stem = Path(ip).stem
-
-            for k, (x1, y1, x2, y2, c) in enumerate(pos):
-                cr = crop_with_pad(img, x1, y1, x2, y2, pad=0.8)
-                if cr is not None and cr.size != 0:
-                    cv2.imwrite(str(out_car / f"{stem}_p{k}_{c:.2f}.jpg"),
-                                cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-
-            H, W = img.shape[:2]
-            bg_saved = 0
-            y = 0
-            while y + BG_SIZE <= H:
-                x = 0
-                while x + BG_SIZE <= W:
-                    if isinstance(max_bg, int) and bg_saved >= max_bg:
-                        break
-                    rect = (x, y, x + BG_SIZE, y + BG_SIZE)
-
-                    ok = True
-                    for pb in pos_xyxy:
-                        if iou_xyxy(rect, pb) > BG_IOU_THR:
-                            ok = False
-                            break
-
-                    if ok:
-                        cr = img[y:y+BG_SIZE, x:x+BG_SIZE]
-                        if cr is not None and cr.size != 0:
-                            cv2.imwrite(str(out_bg / f"{stem}_bg{bg_saved}.jpg"),
-                                        cr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                            bg_saved += 1
-
-                    x += STEP
-                if isinstance(max_bg, int) and bg_saved >= max_bg:
-                    break
-                y += STEP
-
-            dt = time.perf_counter() - t0
-            avg = (time.perf_counter() - t_all) / idx
-            eta = avg * (len(paths) - idx)
-            log(f"cls_export {split}: {idx}/{len(paths)} pos={len(pos)} bg={bg_saved} sec={dt:.3f} eta≈{eta/60:.1f}min")
-
-    ensure_cls_dirs(CLS_ROOT)
-    export_cls_list(det, train_imgs, CLS_ROOT, "train")
-    export_cls_list(det, val_imgs,   CLS_ROOT, "val")
-
-    car_train = len(list(Path(CLS_ROOT, "train/car").glob("*.jpg")))
-    bg_train  = len(list(Path(CLS_ROOT, "train/bg").glob("*.jpg")))
-    car_val   = len(list(Path(CLS_ROOT, "val/car").glob("*.jpg")))
-    bg_val    = len(list(Path(CLS_ROOT, "val/bg").glob("*.jpg")))
-
-    log(f"CLS counts train car/bg: {car_train} / {bg_train}")
-    log(f"CLS counts val   car/bg: {car_val} / {bg_val}")
-
-    def _run(cmd):
-        return subprocess.check_output(cmd, shell=True, text=True)
-
-    print(_run("nvidia-smi -L || true"))
-    smi = _run("nvidia-smi || true")
-    print(smi)
-
-    m = re.search(r"CUDA Version:\s*([0-9]+)\.([0-9]+)", smi)
-    if m:
-        cuda_major = int(m.group(1))
-        cuda_minor = int(m.group(2))
-        cuda_tag = f"cu{cuda_major}{cuda_minor}"
-        print("CUDA tag for PyTorch wheels:", cuda_tag)
-    else:
-        print("GPU не найден — продолжайте на CPU.")
-
-    CLS_DEVICE = 0 if torch.cuda.is_available() else "cpu" #заменить обучение CPU на быстрое
-
-    # !yolo classify train \
-    #   model=yolov8n-cls.pt \
-    #   data={CLS_ROOT} \
-    #   imgsz=128 \
-    #   epochs=50 \
-    #   batch=64 \
-    #   patience=6 \
-    #   project={RUNS} \
-    #   name={CFG["CLS_RUN_NAME"]} \
-    #   device={CLS_DEVICE}
-
-    run_name = CFG["CLS_RUN_NAME"]
-
-    run_dir = Path(RUNS) / run_name
-    if not run_dir.exists():
-        run_dir = Path(RUNS) / "classify" / run_name
-
-    weights_dir = run_dir / "weights"
-    best_pt = weights_dir / "best.pt"
-    last_pt = weights_dir / "last.pt"
-
-    log(f"run_dir: {run_dir}")
-    log(f"best exists: {best_pt.exists()}  -> {best_pt}")
-    log(f"last exists: {last_pt.exists()}  -> {last_pt}")
-
-    if best_pt.exists():
-        ver = YOLO(str(best_pt))
-    elif last_pt.exists():
-        ver = YOLO(str(last_pt))
-    else:
-        raise RuntimeError(f"weights не найдены. Проверь, что train завершился и папка существует: {weights_dir}")
-
-    log("ver loaded")
-
-    def _resolve_cls_run_dir(runs_root: str, name: str) -> Path:
-        runs = Path(runs_root)
-        cand = [runs / name, runs / "classify" / name]
-        for d in cand:
-            if d.exists():
-                return d
-        best_list = list(runs.glob(f"**/{name}/weights/best.pt"))
-        if best_list:
-            return best_list[0].parents[1]
-        raise FileNotFoundError(f"Не найдена папка запуска классификатора '{name}' внутри {runs}")
-
-    def _list_images(dir_path: Path):
-        exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-        return sorted([p for p in dir_path.rglob("*") if p.is_file() and p.suffix.lower() in exts])
-
-    def _plot_line(df: pd.DataFrame, xcol: str, ycols: list, title: str, out_png: Path):
-        plt.figure(figsize=(10, 6))
-        plotted = 0
-        for c in ycols:
-            if c in df.columns:
-                plt.plot(df[xcol].values, df[c].values, label=c)
-                plotted += 1
-        plt.title(title)
-        plt.xlabel(xcol)
-        plt.grid(True)
-        if plotted > 1:
-            plt.legend()
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=150)
-        plt.show()
-
-    def _plot_confusion(cm: np.ndarray, class_names: list, title: str, out_png: Path, normalize_rows: bool):
-        cm2 = cm.astype(float).copy()
-        if normalize_rows:
-            row_sum = cm2.sum(axis=1, keepdims=True)
-            row_sum[row_sum == 0] = 1.0
-            cm2 = cm2 / row_sum
-
-        plt.figure(figsize=(8, 7))
-        plt.imshow(cm2, interpolation="nearest")
-        plt.title(title)
-        plt.xlabel("Pred")
-        plt.ylabel("True")
-        plt.xticks(range(len(class_names)), class_names, rotation=45, ha="right")
-        plt.yticks(range(len(class_names)), class_names)
-
-        for i in range(cm2.shape[0]):
-            for j in range(cm2.shape[1]):
-                val = cm2[i, j]
-                txt = f"{val:.2f}" if normalize_rows else str(int(val))
-                plt.text(j, i, txt, ha="center", va="center")
-
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=150)
-        plt.show()
-
-    def _binary_pr_curve(y_true: np.ndarray, y_score: np.ndarray):
-        order = np.argsort(-y_score)
-        y_true = y_true[order]
-
-        tp = np.cumsum(y_true == 1)
-        fp = np.cumsum(y_true == 0)
-        denom = tp + fp
-        denom[denom == 0] = 1
-        precision = tp / denom
-
-        total_pos = np.sum(y_true == 1)
-        recall = tp / total_pos if total_pos > 0 else np.zeros_like(tp, dtype=float)
-        return recall, precision
-
-    def _binary_roc_curve(y_true: np.ndarray, y_score: np.ndarray):
-        order = np.argsort(-y_score)
-        y_true = y_true[order]
-
-        P = np.sum(y_true == 1)
-        N = np.sum(y_true == 0)
-        if P == 0 or N == 0:
-            return np.array([0.0, 1.0]), np.array([0.0, 1.0])
-
-        tp = np.cumsum(y_true == 1)
-        fp = np.cumsum(y_true == 0)
-        tpr = tp / P
-        fpr = fp / N
-        return fpr, tpr
-
-    def _plot_pr_roc_if_binary(y_true_idx: np.ndarray, prob_mat: np.ndarray, pos_class: int, out_dir: Path):
-        n = prob_mat.shape[1]
-        if n != 2:
-            print("PR/ROC пропущены: классов не 2, а", n)
-            return
-
-        present = np.unique(y_true_idx)
-        if len(present) < 2:
-            print("PR/ROC пропущены: в выбранной выборке присутствует только один класс:", present.tolist())
-            return
-
-        y_true = (y_true_idx == pos_class).astype(int)
-        if np.sum(y_true == 1) == 0 or np.sum(y_true == 0) == 0:
-            print("PR/ROC пропущены: после выбора pos_class один из классов отсутствует.")
-            return
-
-        y_score = prob_mat[:, pos_class].astype(float)
-        recall, precision = _binary_pr_curve(y_true, y_score)
-        fpr, tpr = _binary_roc_curve(y_true, y_score)
-
-        plt.figure(figsize=(8, 6))
-        plt.plot(recall, precision)
-        plt.title("PR-кривая (binary)")
-        plt.xlabel("Recall")
-        plt.ylabel("Precision")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(out_dir / "pr_curve_custom.png", dpi=150)
-        plt.show()
-
-        plt.figure(figsize=(8, 6))
-        plt.plot(fpr, tpr)
-        plt.title("ROC-кривая (binary)")
-        plt.xlabel("FPR")
-        plt.ylabel("TPR")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(out_dir / "roc_curve_custom.png", dpi=150)
-        plt.show()
-
-        plt.figure(figsize=(8, 6))
-        plt.hist(y_score[y_true == 1], bins=30, alpha=0.7, label="pos (true=1)")
-        plt.hist(y_score[y_true == 0], bins=30, alpha=0.7, label="neg (true=0)")
-        plt.title("Распределение score(pos)")
-        plt.xlabel("score(pos)")
-        plt.ylabel("count")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(out_dir / "score_hist_pos.png", dpi=150)
-        plt.show()
-
-    def _plot_confidence_graphs(top1_conf: np.ndarray, top2_conf: np.ndarray, y_true: np.ndarray, class_names: list, out_dir: Path):
-        margin = top1_conf - top2_conf
-
-        plt.figure(figsize=(10, 6))
-        plt.hist(top1_conf, bins=40)
-        plt.title("Распределение top1 confidence")
-        plt.xlabel("top1_conf")
-        plt.ylabel("count")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(out_dir / "top1_conf_hist.png", dpi=150)
-        plt.show()
-
-        plt.figure(figsize=(10, 6))
-        plt.hist(margin, bins=40)
-        plt.title("Распределение запаса уверенности (top1 - top2)")
-        plt.xlabel("top1-top2")
-        plt.ylabel("count")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(out_dir / "margin_top1_top2_hist.png", dpi=150)
-        plt.show()
-
-        plt.figure(figsize=(10, 6))
-        for ci in sorted(set(int(x) for x in np.unique(y_true))):
-            mask = (y_true == ci)
-            plt.hist(top1_conf[mask], bins=40, alpha=0.6, label=f"true={class_names[ci]}")
-        plt.title("top1 confidence по истинному классу")
-        plt.xlabel("top1_conf")
-        plt.ylabel("count")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(out_dir / "top1_conf_by_true_class.png", dpi=150)
-        plt.show()
-
-    def _plot_class_balance(cls_root: str, class_names: list, out_dir: Path):
-        root = Path(cls_root)
-        tr = root / "train"
-        va = root / "val"
-
-        train_counts = []
-        val_counts = []
-        for c in class_names:
-            train_counts.append(len(_list_images(tr / c)) if (tr / c).exists() else 0)
-            val_counts.append(len(_list_images(va / c)) if (va / c).exists() else 0)
-
-        x = np.arange(len(class_names))
-        width = 0.4
-        plt.figure(figsize=(10, 6))
-        plt.bar(x - width/2, train_counts, width, label="train")
-        plt.bar(x + width/2, val_counts, width, label="val")
-        plt.title("Баланс классов (кол-во изображений)")
-        plt.xticks(x, class_names, rotation=45, ha="right")
-        plt.grid(True, axis="y")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(out_dir / "class_balance.png", dpi=150)
-        plt.show()
-
-    def _eval_on_val(ver, cls_root: str, imgsz: int, device, limit: int, seed: int = 0):
-        val_root = Path(cls_root) / "val"
-        if not val_root.exists():
-            raise FileNotFoundError(f"Не найден CLS_ROOT/val: {val_root}")
-
-        names_map = ver.names
-        if isinstance(names_map, dict):
-            idxs = sorted(names_map.keys())
-            class_names = [names_map[i] for i in idxs]
-        else:
-            class_names = list(names_map)
-
-        name_to_idx = {n: i for i, n in enumerate(class_names)}
-
-        per_class = {}
-        for cname in class_names:
-            d = val_root / cname
-            imgs = _list_images(d) if d.exists() else []
-            if imgs:
-                per_class[name_to_idx[cname]] = imgs
-
-        if not per_class:
-            raise RuntimeError("В CLS_ROOT/val нет изображений в папках классов, соответствующих ver.names")
-
-        rng = np.random.default_rng(seed)
-
-        items = []
-        if limit and limit > 0:
-            n_cls = len(per_class)
-            target = max(1, limit // n_cls)
-            for ci, imgs in per_class.items():
-                k = min(target, len(imgs))
-                pick = rng.choice(len(imgs), size=k, replace=False)
-                for j in pick:
-                    items.append((imgs[j], ci))
-            rng.shuffle(items)
-        else:
-            for ci, imgs in per_class.items():
-                for p in imgs:
-                    items.append((p, ci))
-            rng.shuffle(items)
-
-        y_true = np.array([ci for _, ci in items], dtype=int)
-
-        prob_list = []
-        y_pred = np.zeros(len(items), dtype=int)
-        top1_conf = np.zeros(len(items), dtype=float)
-        top2_conf = np.zeros(len(items), dtype=float)
-
-        t0 = time.perf_counter()
-        for i, (p, _) in enumerate(items):
-            r = ver.predict(source=str(p), imgsz=imgsz, device=device, verbose=False)[0]
-            probs = r.probs.data.detach().cpu().numpy().astype(float)
-            prob_list.append(probs)
-
-            order = np.argsort(-probs)
-            y_pred[i] = int(order[0])
-            top1_conf[i] = float(probs[order[0]])
-            top2_conf[i] = float(probs[order[1]]) if len(order) > 1 else 0.0
-
-        t_all = time.perf_counter() - t0
-        prob_mat = np.stack(prob_list, axis=0)
-        ms_per_img = (t_all / len(items)) * 1000.0
-
-        return items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img
-
-    def _metrics_table(cm: np.ndarray, class_names: list):
-        rows = []
-        total = cm.sum()
-        acc = float(np.trace(cm) / total) if total > 0 else 0.0
-
-        for i, name in enumerate(class_names):
-            tp = float(cm[i, i])
-            fp = float(cm[:, i].sum() - tp)
-            fn = float(cm[i, :].sum() - tp)
-
-            prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-            rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-            f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
-            supp = float(cm[i, :].sum())
-
-            rows.append({"class": name, "precision": prec, "recall": rec, "f1": f1, "support": int(supp)})
-
-        df = pd.DataFrame(rows)
-        macro = {
-            "class": "macro_avg",
-            "precision": float(df["precision"].mean()) if len(df) else 0.0,
-            "recall": float(df["recall"].mean()) if len(df) else 0.0,
-            "f1": float(df["f1"].mean()) if len(df) else 0.0,
-            "support": int(total),
-        }
-        df = pd.concat([df, pd.DataFrame([macro])], ignore_index=True)
-        return acc, df
-
-    def _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir: Path, max_show: int = 24):
-        bad = np.where(y_true != y_pred)[0]
-        if bad.size == 0:
-            print("Ошибок классификации на выбранной выборке нет.")
-            return
-
-        bad = bad[:min(max_show, bad.size)]
-        cols = 6
-        rows = int(np.ceil(len(bad) / cols))
-
-        plt.figure(figsize=(18, 3 * rows))
-        for k, idx in enumerate(bad, 1):
-            p, _ = items[idx]
-            img = PILImage.open(p).convert("RGB")
-            plt.subplot(rows, cols, k)
-            plt.imshow(img)
-            plt.axis("off")
-            t = class_names[int(y_true[idx])]
-            pr = class_names[int(y_pred[idx])]
-            plt.title(f"true={t} pred={pr} conf={top1_conf[idx]:.3f}")
-
-        plt.tight_layout()
-        plt.savefig(out_dir / "misclassified_grid.png", dpi=150)
-        plt.show()
-
-    def show_cls_lab_graphs(ver, RUNS: str, CLS_ROOT: str, name: str, imgsz: int = 128, eval_limit: int = 500):
-        run_dir = _resolve_cls_run_dir(RUNS, name)
-        out_dir = run_dir / "lab_graphs"
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        print("CLS run_dir:", run_dir)
-        print("CLS_ROOT:", CLS_ROOT)
-
-        names_map = ver.names
-        if isinstance(names_map, dict):
-            idxs = sorted(names_map.keys())
-            class_names = [names_map[i] for i in idxs]
-        else:
-            class_names = list(names_map)
-
-        csv_fp = run_dir / "results.csv"
-        if csv_fp.exists():
-            df = pd.read_csv(csv_fp)
-            xcol = "epoch" if "epoch" in df.columns else df.columns[0]
-            loss_cols = [c for c in df.columns if "loss" in c.lower()]
-            acc_cols = [c for c in df.columns if ("acc" in c.lower()) or ("accuracy" in c.lower())]
-
-            if loss_cols:
-                _plot_line(df, xcol, loss_cols, "CLS: loss по эпохам", out_dir / "train_loss_curves.png")
-            else:
-                print("В results.csv нет колонок loss:", list(df.columns))
-
-            if acc_cols:
-                _plot_line(df, xcol, acc_cols, "CLS: accuracy по эпохам", out_dir / "train_acc_curves.png")
-            else:
-                print("В results.csv нет колонок accuracy:", list(df.columns))
-        else:
-            print("results.csv не найден:", csv_fp)
-
-        _plot_class_balance(CLS_ROOT, class_names, out_dir)
-
-        items, class_names, y_true, y_pred, prob_mat, top1_conf, top2_conf, ms_per_img = _eval_on_val(
-            ver, CLS_ROOT, imgsz=imgsz, device=CLS_DEVICE, limit=eval_limit, seed=0
+            tiled_total += len(tiled_boxes)
+            all_boxes.extend(tiled_boxes)
+
+        if bool(CFG.get("DISTANT_ROI_ENABLED", True)):
+            d_conf = float(CFG.get("DISTANT_CONF", max(1e-6, conf * 0.35)))
+            d_iou = float(CFG.get("DISTANT_IOU", iou))
+            d_max_det = int(CFG.get("DISTANT_MAX_DET", max_det))
+            d_batch = int(CFG.get("DISTANT_BATCH", max(1, batch)))
+
+            distant_boxes = _detect_distant_roi_boxes(
+                model,
+                img_bgr,
+                conf=d_conf,
+                iou=d_iou,
+                imgsz=imgsz,
+                max_det=d_max_det,
+                nms_thr=nms_thr,
+                batch=d_batch,
+                keep_ids=keep_ids
+            )
+            tiled_total += len(distant_boxes)
+            all_boxes.extend(distant_boxes)
+
+    boxes = nms_union(all_boxes, thr=nms_thr)
+    if bool(CFG.get("BOX_VOTE_REFINE", True)):
+        boxes = refine_boxes_by_vote(
+            boxes,
+            all_boxes,
+            vote_iou=float(CFG.get("BOX_VOTE_IOU", 0.35))
         )
 
-        n_cls = len(class_names)
-        cm = np.zeros((n_cls, n_cls), dtype=int)
-        for t, p in zip(y_true, y_pred):
-            cm[t, p] += 1
-
-        _plot_confusion(cm, class_names, "Confusion matrix (counts)", out_dir / "confusion_counts.png", normalize_rows=False)
-        _plot_confusion(cm, class_names, "Confusion matrix (row-normalized)", out_dir / "confusion_norm.png", normalize_rows=True)
-
-        acc, tbl = _metrics_table(cm, class_names)
-        print("Accuracy:", acc)
-        display(tbl)
-
-        print("Среднее время инференса на val (мс/изображение):", round(ms_per_img, 2))
-
-        _plot_confidence_graphs(top1_conf, top2_conf, y_true, class_names, out_dir)
-
-        pos_class = 0
-        if "car" in class_names:
-            pos_class = int(class_names.index("car"))
-        _plot_pr_roc_if_binary(y_true, prob_mat, pos_class=pos_class, out_dir=out_dir)
-
-        _show_misclassified_grid(items, class_names, y_true, y_pred, top1_conf, out_dir, max_show=24)
-
-        img_files = sorted([p for p in run_dir.glob("*.png")]) + sorted([p for p in run_dir.glob("*.jpg")])
-        if img_files:
-            print("Ultralytics-артефакты в run_dir:", len(img_files))
-            for p in img_files:
-                display(IPImage(filename=str(p)))
-        else:
-            print("В run_dir нет png/jpg артефактов Ultralytics.")
-
-    show_cls_lab_graphs(ver, RUNS, CLS_ROOT, "verifier_car_bg", imgsz=128, eval_limit=500)
-    def find_cls_results_png(runs_root: str, run_name: str):
-        """
-        Ищет results.png для указанного run_name в Ultralytics runs.
-        Возвращает:
-          - Path (если найдено)
-          - либо (None, first_hits, total_hits), где first_hits = первые 30 найденных путей results.png
-        """
-        runs = Path(runs_root)
-
-        cand = [
-            runs / run_name / "results.png",
-            runs / "classify" / run_name / "results.png",
-            runs / "detect" / run_name / "results.png",
-            runs / "segment" / run_name / "results.png",
-            runs / "pose" / run_name / "results.png",
-            ]
-        for p in cand:
-            if p.exists():
-                return p
-
-        hits = sorted(runs.glob("**/results.png"), key=lambda x: str(x))
-        return None, hits[:30], len(hits)
+    return boxes, len(full_boxes), tiled_total
 
 def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> dict:
+    global PRED_DEVICE, TILE, OVERLAP, BASE_IMGSZ, TILED_IMGSZ
+
     t0 = time.time()
     os.makedirs(out_dir, exist_ok=True)
 
     warnings = []
+
     nb = (cfg.get("notebooks", {}) or {}).get("vehicle_detect", {}) or {}
     det_cfg = (cfg.get("detector", {}) or {})
-    pp_cfg  = (cfg.get("postprocess", {}) or {})
-    un_cfg  = (cfg.get("union_nms", {}) or {})
+    pp_cfg = (cfg.get("postprocess", {}) or {})
+    un_cfg = (cfg.get("union_nms", {}) or {})
+    visual_cfg = (cfg.get("visual", {}) or {})
 
     model_path = str(cfg.get("yolo_model_path", "") or "").strip().strip('"').strip("'")
     if not model_path:
         raise FileNotFoundError("Не задан yolo_model_path в cfg")
 
     model_path = os.path.expandvars(os.path.expanduser(model_path))
+
     if not Path(model_path).is_absolute():
         ydir = str(cfg.get("yolo_dir", "") or "").strip()
         ydir = os.path.expandvars(os.path.expanduser(ydir))
@@ -1592,75 +1117,133 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
     CFG["MODEL_PATH"] = model_path
 
-    # классы для фильтрации по именам (если заданы в config)
-    try:
-        keep_names = pp_cfg.get("keep_classes", None)
-        if keep_names:
-            CFG["KEEP_CLASS_NAMES"] = {str(x) for x in keep_names if str(x).strip()}
-    except Exception:
-        pass
+    keep_names = pp_cfg.get("keep_classes", None)
+    if keep_names:
+        CFG["KEEP_CLASS_NAMES"] = {
+            _normalized_vehicle_class(str(x).strip().lower())
+            for x in keep_names
+            if str(x).strip()
+        }
 
-    # параметры детектора берём из общего конфига (а не из colab-дефолтов)
-    CFG["DET_CONF"] = float(nb.get("conf", det_cfg.get("conf", CFG.get("DET_CONF", 0.15))))
-    CFG["DET_IOU"] = float(nb.get("iou", det_cfg.get("iou", CFG.get("DET_IOU", 0.5))))
-    CFG["DET_MAX_DET"] = int(nb.get("max_det", det_cfg.get("max_det", CFG.get("DET_MAX_DET", 300))))
+    # Быстрый high-recall режим без апскейла/аугментаций
+    CFG["DET_CONF"] = float(nb.get("conf", det_cfg.get("conf", 0.0003)))
+    CFG["DET_IOU"] = float(nb.get("iou", det_cfg.get("iou", 0.95)))
+    CFG["DET_MAX_DET"] = int(nb.get("max_det", det_cfg.get("max_det", 16000)))
 
-    # склейка между тайлами
-    if bool(un_cfg.get("enabled", False)):
-        CFG["DET_NMS_THR"] = float(un_cfg.get("iou", CFG.get("DET_NMS_THR", 0.55)))
+    if bool(un_cfg.get("enabled", True)):
+        CFG["DET_NMS_THR"] = float(un_cfg.get("iou", 0.97))
     else:
-        CFG["DET_NMS_THR"] = float(nb.get("nms_thr", CFG.get("DET_NMS_THR", 0.5)))
+        CFG["DET_NMS_THR"] = float(nb.get("nms_thr", det_cfg.get("nms_thr", 0.97)))
 
-    CFG["TILED_BATCH"] = int(nb.get("tiled_batch", CFG.get("TILED_BATCH", 16)))
-    CFG["OVERLAP"] = float(nb.get("overlap", CFG.get("OVERLAP", 0.2)))
+    CFG["TILED_BATCH"] = int(nb.get("tiled_batch", det_cfg.get("tiled_batch", 8)))
+    CFG["OVERLAP"] = float(nb.get("overlap", det_cfg.get("overlap", 0.22)))
+    CFG["DISTANT_ROI_ENABLED"] = bool(nb.get("distant_roi_enabled", det_cfg.get("distant_roi_enabled", True)))
+    CFG["DISTANT_ROI_Y_END_FRAC"] = float(nb.get("distant_roi_y_end_frac", det_cfg.get("distant_roi_y_end_frac", 0.52)))
+    CFG["DISTANT_ROI_X_LEFT_FRAC"] = float(nb.get("distant_roi_x_left_frac", det_cfg.get("distant_roi_x_left_frac", 0.08)))
+    CFG["DISTANT_ROI_X_RIGHT_FRAC"] = float(nb.get("distant_roi_x_right_frac", det_cfg.get("distant_roi_x_right_frac", 0.92)))
+    CFG["DISTANT_TILE_SIZES"] = list(nb.get("distant_tile_sizes", det_cfg.get("distant_tile_sizes", [256, 192, 128, 96, 64])))
+    CFG["DISTANT_UPSCALE_FACTORS"] = list(nb.get("distant_upscale_factors", det_cfg.get("distant_upscale_factors", [1.0, 2.0])))
+    CFG["DISTANT_OVERLAP"] = float(nb.get("distant_overlap", det_cfg.get("distant_overlap", 0.35)))
+    CFG["DISTANT_CONF"] = float(nb.get("distant_conf", det_cfg.get("distant_conf", 0.00003)))
+    CFG["DISTANT_IOU"] = float(nb.get("distant_iou", det_cfg.get("distant_iou", 0.95)))
+    CFG["DISTANT_MAX_DET"] = int(nb.get("distant_max_det", det_cfg.get("distant_max_det", 20000)))
+    CFG["DISTANT_BATCH"] = int(nb.get("distant_batch", det_cfg.get("distant_batch", 6)))
+    CFG["DISTANT_TILE_KEEP_RATIO"] = float(nb.get("distant_tile_keep_ratio", det_cfg.get("distant_tile_keep_ratio", 0.35)))
+    CFG["DISTANT_MAX_TILES"] = int(nb.get("distant_max_tiles", det_cfg.get("distant_max_tiles", 220)))
+    CFG["DISTANT_MIN_TILES"] = int(nb.get("distant_min_tiles", det_cfg.get("distant_min_tiles", 24)))
+    CFG["DISTANT_RELAX_POSTFILTER"] = bool(nb.get("distant_relax_postfilter", det_cfg.get("distant_relax_postfilter", True)))
+    CFG["DISTANT_TINY_MAX_SIDE"] = int(nb.get("distant_tiny_max_side", det_cfg.get("distant_tiny_max_side", 8)))
+    CFG["NMS_MAX_INPUT"] = int(nb.get("nms_max_input", det_cfg.get("nms_max_input", 6000)))
+    CFG["BOX_VOTE_REFINE"] = bool(nb.get("box_vote_refine", det_cfg.get("box_vote_refine", True)))
+    CFG["BOX_VOTE_IOU"] = float(nb.get("box_vote_iou", det_cfg.get("box_vote_iou", 0.35)))
 
-    # ключ к 4K: авто-тайл под imgsz (иначе 40–60 тайлов и дубли)
-    tile_v = nb.get("tile", "auto")
-    CFG["TILE"] = int(tile_v) if str(tile_v).lower() not in ("auto", "") else "auto"
+    img = read_image_path(image_path)
+    H, W = img.shape[:2]
 
-    target = det_cfg.get("imgsz", 1280) or 1280
-    CFG["AUTO_TILE_TARGET"] = int(nb.get("auto_tile_target", target))
-    CFG["TILED_IMGSZ"] = int(nb.get("imgsz", target))
+    target = int(nb.get("imgsz", det_cfg.get("imgsz", 1280)) or 1280)
+    target = max(640, _round32(target))
+
+    BASE_IMGSZ = target
+    TILED_IMGSZ = target
+    CFG["BASE_IMGSZ"] = target
+    CFG["TILED_IMGSZ"] = target
+
+    tile_sizes_cfg = nb.get("tile_sizes", det_cfg.get("tile_sizes", [640, 384, 256, 192]))
+
+    parsed_tile_sizes = []
+
+    if isinstance(tile_sizes_cfg, list):
+        tile_source = tile_sizes_cfg
+    else:
+        tile_source = [tile_sizes_cfg]
+
+    for value in tile_source:
+        try:
+            tile_value = int(value)
+        except Exception:
+            continue
+
+        if tile_value > 0:
+            parsed_tile_sizes.append(tile_value)
+
+    if not parsed_tile_sizes:
+        parsed_tile_sizes = [640, 384, 256, 192]
+
+    CFG["TILE_SIZES"] = parsed_tile_sizes
+
+    tile_v = nb.get("tile", det_cfg.get("tile", parsed_tile_sizes[0]))
+
+    if str(tile_v).lower() in {"auto", ""}:
+        TILE = max(64, min(int(parsed_tile_sizes[0]), H, W))
+    else:
+        TILE = max(64, min(int(tile_v), H, W))
+
+    OVERLAP = float(CFG["OVERLAP"])
+    CFG["TILE"] = int(TILE)
 
     prefer_gpu = (device_mode or "auto") != "cpu"
     PRED_DEVICE = pick_device(prefer_gpu=prefer_gpu)
     device_used = "gpu" if PRED_DEVICE != "cpu" else "cpu"
 
+    # На CPU ограничиваем взрыв кандидатов в YOLO NMS (иначе предупреждение time limit exceeded).
+    if PRED_DEVICE == "cpu":
+        CFG["DET_MAX_DET"] = int(min(int(CFG.get("DET_MAX_DET", 16000)), int(nb.get("cpu_det_max_det", 3500))))
+        CFG["DISTANT_MAX_DET"] = int(min(int(CFG.get("DISTANT_MAX_DET", 20000)), int(nb.get("cpu_distant_max_det", 4500))))
+        CFG["NMS_MAX_INPUT"] = int(min(int(CFG.get("NMS_MAX_INPUT", 6000)), int(nb.get("cpu_nms_max_input", 2200))))
+        CFG["DISTANT_MAX_TILES"] = int(min(int(CFG.get("DISTANT_MAX_TILES", 220)), int(nb.get("cpu_distant_max_tiles", 80))))
+        CFG["DISTANT_MIN_TILES"] = int(min(int(CFG.get("DISTANT_MIN_TILES", 24)), int(nb.get("cpu_distant_min_tiles", 12))))
+        CFG["DISTANT_UPSCALE_FACTORS"] = list(nb.get("cpu_distant_upscale_factors", [1.0, 2.0]))
+        CFG["DISTANT_TILE_KEEP_RATIO"] = float(min(float(CFG.get("DISTANT_TILE_KEEP_RATIO", 0.35)), float(nb.get("cpu_distant_tile_keep_ratio", 0.15))))
+        CFG["TILED_BATCH"] = int(max(1, nb.get("cpu_tiled_batch", max(1, int(CFG.get("TILED_BATCH", 8))))))
+        target = int(min(int(target), int(nb.get("cpu_imgsz", 960))))
+        BASE_IMGSZ = max(640, _round32(target))
+        TILED_IMGSZ = BASE_IMGSZ
+        CFG["BASE_IMGSZ"] = BASE_IMGSZ
+        CFG["TILED_IMGSZ"] = TILED_IMGSZ
+        warnings.append("cpu_fast_profile_enabled")
+
     if (device_mode or "auto") == "gpu" and device_used != "gpu":
         warnings.append("gpu_requested_but_unavailable")
-
-    resolve_tile_and_sizes(image_path)
-
-    global _DET_MODEL
-    _DET_MODEL = None
 
     det = get_det_model()
     keep_ids = get_keep_class_ids(det, CFG["KEEP_CLASS_NAMES"])
 
-    img = read_image_path(image_path)
-    H, W = img.shape[:2]
+    use_tiles = bool(nb.get("use_tiles", det_cfg.get("use_tiles", True)))
 
     t_inf0 = time.time()
 
-    boxes = detect_tiled(
+    boxes, full_count, tiled_count = detect_vehicle_candidates_max_recall(
         det,
         img,
-        conf=float(CFG["DET_CONF"]),
-        iou=float(CFG["DET_IOU"]),
-        imgsz=int(TILED_IMGSZ),
-        max_det=int(CFG["DET_MAX_DET"]),
-        nms_thr=float(CFG["DET_NMS_THR"]),
-        tile=int(TILE),
-        overlap=float(OVERLAP),
-        batch=int(CFG["TILED_BATCH"]),
         keep_ids=keep_ids,
+        use_tiles=use_tiles
     )
 
     t_inf1 = time.time()
-    pp_cfg = (cfg.get("postprocess", {}) or {})
+
     if bool(pp_cfg.get("enabled", False)) and boxes:
-        min_conf = float(pp_cfg.get("min_conf", float(CFG["DET_CONF"])))
-        min_box_px = int(pp_cfg.get("min_box_px", 0))
+        min_conf = float(pp_cfg.get("min_conf", 0.0))
+        min_box_px = int(pp_cfg.get("min_box_px", 1))
         min_area_frac = float(pp_cfg.get("min_area_frac", 0.0))
         ar_min = float(pp_cfg.get("aspect_ratio_min", 0.0))
         ar_max = float(pp_cfg.get("aspect_ratio_max", 1e9))
@@ -1670,68 +1253,48 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
         img_area = float(W * H) if W > 0 and H > 0 else 0.0
         y_top = int(round(ex_top * H))
         y_bot = int(round((1.0 - ex_bot) * H))
+        distant_relax = bool(CFG.get("DISTANT_RELAX_POSTFILTER", True))
+        distant_tiny_max_side = int(CFG.get("DISTANT_TINY_MAX_SIDE", 8))
+        distant_y_lim = int(round(float(CFG.get("DISTANT_ROI_Y_END_FRAC", 0.52)) * H))
 
         filtered = []
+
         for box in boxes:
             x1, y1, x2, y2, c = box[:5]
             tail = tuple(box[5:])
 
+            x1, y1, x2, y2 = _safe_xyxy_int(x1, y1, x2, y2, W, H)
+
             c = float(c)
             if c < min_conf:
                 continue
+
             bw = int(x2) - int(x1)
             bh = int(y2) - int(y1)
-            if bw < min_box_px or bh < min_box_px:
+            cy = (int(y1) + int(y2)) // 2
+            is_distant_tiny = distant_relax and (max(bw, bh) <= distant_tiny_max_side) and (cy <= distant_y_lim)
+
+            min_side_req = 1 if is_distant_tiny else min_box_px
+            if bw < min_side_req or bh < min_side_req:
                 continue
-            if img_area > 0.0 and (bw * bh) < (min_area_frac * img_area):
+
+            if (not is_distant_tiny) and img_area > 0.0 and (bw * bh) < (min_area_frac * img_area):
                 continue
-            if bw > 0 and bh > 0:
+
+            if (not is_distant_tiny) and bw > 0 and bh > 0:
                 ar = float(bw) / float(bh)
                 if ar < ar_min or ar > ar_max:
                     continue
-            cy = (int(y1) + int(y2)) // 2
-            if cy < y_top or cy > y_bot:
+
+            if (not is_distant_tiny) and (cy < y_top or cy > y_bot):
                 continue
 
             filtered.append((int(x1), int(y1), int(x2), int(y2), c, *tail))
 
-        cont_cfg = (pp_cfg.get("containment", {}) or {})
-        if bool(cont_cfg.get("enabled", False)) and filtered:
-            cover_thr = float(cont_cfg.get("cover_thr", 0.92))
-            conf_margin = float(cont_cfg.get("conf_margin", 0.02))
+        boxes = filtered
 
-            def _inter(a, b):
-                ax1, ay1, ax2, ay2 = a
-                bx1, by1, bx2, by2 = b
-                ix1 = max(ax1, bx1); iy1 = max(ay1, by1)
-                ix2 = min(ax2, bx2); iy2 = min(ay2, by2)
-                iw = max(0, ix2 - ix1); ih = max(0, iy2 - iy1)
-                return iw * ih
-
-            def _area(bb):
-                return max(0, bb[2] - bb[0]) * max(0, bb[3] - bb[1])
-
-            kept = []
-            for b in sorted(filtered, key=lambda t: t[4], reverse=True):
-                bb = b[:4]
-                ab = _area(bb)
-                if ab <= 0:
-                    continue
-                drop = False
-                for k in kept:
-                    kk = k[:4]
-                    inter = _inter(kk, bb)
-                    cover = inter / float(ab + 1e-6)
-                    if cover >= cover_thr and float(k[4]) >= float(b[4]) + conf_margin:
-                        drop = True
-                        break
-                if not drop:
-                    kept.append(b)
-            boxes = kept
-        else:
-            boxes = filtered
-        mp_cfg = (pp_cfg.get("merge_parts", {}) or {})
-    if bool(mp_cfg.get("enabled", True)) and boxes:
+    mp_cfg = (pp_cfg.get("merge_parts", {}) or {})
+    if bool(mp_cfg.get("enabled", False)) and boxes:
         boxes = _vk_merge_parts_union(
             boxes,
             W=W,
@@ -1743,19 +1306,19 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             gap_frac=float(mp_cfg.get("gap_frac", 0.35)),
             center_frac=float(mp_cfg.get("center_frac", 2.0)),
         )
+
     dets = []
     vis = img.copy()
     brightness = round(float(np.mean(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))), 2)
+
+    min_draw_px = int(visual_cfg.get("min_draw_px", 12))
 
     for i, box in enumerate(boxes, 1):
         x1, y1, x2, y2, c = box[:5]
         cls_id = int(box[5]) if len(box) > 5 else 0
         cls_name = _normalized_vehicle_class(box[6] if len(box) > 6 else "vehicle")
 
-        x1 = max(0, min(int(x1), W - 1))
-        x2 = max(0, min(int(x2), W - 1))
-        y1 = max(0, min(int(y1), H - 1))
-        y2 = max(0, min(int(y2), H - 1))
+        x1, y1, x2, y2 = _safe_xyxy_int(x1, y1, x2, y2, W, H)
 
         if x2 <= x1 or y2 <= y1:
             continue
@@ -1766,7 +1329,7 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
 
         color = _vehicle_color_bgr(cls_name)
         label = f"{cls_name} {i} {cluster_metric}"
-        _draw_box_and_label(vis, x1, y1, x2, y2, label, color)
+        _draw_box_for_tiny_object(vis, x1, y1, x2, y2, label, color, min_draw_px=min_draw_px)
 
         dets.append(
             {
@@ -1787,11 +1350,14 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
     cv2.imwrite(annotated_path, vis)
 
     csv_path = os.path.abspath(os.path.join(out_dir, "cluster_1_results.csv"))
+
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("filename,det_idx,cls,x1,y1,x2,y2,w_px,h_px,conf,cluster_metric,brightness\n")
+
         for i, d in enumerate(dets, start=1):
             x1, y1, x2, y2 = d["bbox_xyxy"]
             meta = d.get("meta", {}) or {}
+
             f.write(
                 f"{os.path.basename(image_path)},{i},{d['cls_name']},{x1},{y1},{x2},{y2},"
                 f"{meta.get('w_px', '')},{meta.get('h_px', '')},{float(d['conf']):.6f},"
@@ -1814,6 +1380,13 @@ def run(image_path: str, out_dir: str, cfg: dict, device_mode: str = "auto") -> 
             "count": int(len(dets)),
             "csv_path": csv_path,
             "brightness": brightness,
+            "full_image_detections": int(full_count),
+            "tiled_detections": int(tiled_count),
+            "tile_sizes": [int(x) for x in CFG.get("TILE_SIZES", [])],
+            "imgsz": int(TILED_IMGSZ),
+            "conf": float(CFG["DET_CONF"]),
+            "iou": float(CFG["DET_IOU"]),
+            "nms_thr": float(CFG["DET_NMS_THR"]),
         },
         "timings_ms": {
             "total": total_ms,
