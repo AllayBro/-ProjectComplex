@@ -50,7 +50,6 @@ def _read_manual_georef(image_path: str) -> Dict[str, Any]:
         "azimuth_deg": az,
         "uncertainty_m": unc,
     }
-    return out
 
 def _norm_angle(deg: float) -> float:
     while deg < 0.0:
@@ -292,7 +291,37 @@ def _primary_vehicle(detections: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _meters_per_deg_lat() -> float:
     return 111320.0
 
-def _refined_heading(exif_heading: Optional[float], nearest_road: Dict[str, Any], cfg: Dict[str, Any]) -> Tuple[Optional[float], str]:
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
+    return 2.0 * r * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
+def _view_is_across_road(scene_features: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(scene_features, dict):
+        return False
+
+    axis = _safe_float(scene_features.get("road_axis_angle_img_deg"))
+    if axis is None:
+        return False
+
+    # Дорога поперёк кадра (горизонтальные линии внизу) — съёмка «в сторону», а не вдоль дороги.
+    delta = abs(_norm_angle(axis) - 90.0)
+    delta = min(delta, 180.0 - delta)
+    return delta < float(35.0)
+
+
+def _refined_heading(
+        exif_heading: Optional[float],
+        nearest_road: Dict[str, Any],
+        cfg: Dict[str, Any],
+        scene_features: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[float], str]:
     road_status = str(nearest_road.get("status", ""))
     if road_status != "ok":
         if exif_heading is not None:
@@ -313,9 +342,15 @@ def _refined_heading(exif_heading: Optional[float], nearest_road: Dict[str, Any]
 
     heading = _norm_angle(float(exif_heading))
     chosen = cand1 if _angle_delta(heading, cand1) <= _angle_delta(heading, cand2) else cand2
-    max_snap = float(cfg.get("max_heading_snap_deg", 35.0))
+    max_snap = float(cfg.get("max_heading_snap_deg", 18.0))
+    delta = _angle_delta(heading, chosen)
 
-    if _angle_delta(heading, chosen) <= max_snap:
+    if delta <= max_snap:
+        if _view_is_across_road(scene_features):
+            across_snap = float(cfg.get("max_heading_snap_across_road_deg", 10.0))
+            vertical_count = float(scene_features.get("vertical_structure_count", 0.0) or 0.0)
+            if delta > across_snap or vertical_count >= 3.0:
+                return heading, "exif_across_road"
         return chosen, "road_axis_snapped"
 
     return heading, "exif"
@@ -414,19 +449,16 @@ def _candidate_search(
         cfg: Dict[str, Any],
         artifacts: Dict[str, Any],
         image_w: int,
+        scene_features: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     road_status = str(nearest_road.get("status", ""))
     road_lat = _safe_float(nearest_road.get("point_lat"))
     road_lon = _safe_float(nearest_road.get("point_lon"))
     road_bearing = _safe_float(nearest_road.get("segment_bearing_deg"))
 
-    base_heading, heading_source = _refined_heading(exif_heading, nearest_road, cfg)
+    base_heading, heading_source = _refined_heading(exif_heading, nearest_road, cfg, scene_features)
     heading_offset = _vehicle_heading_offset_deg(primary_vehicle, artifacts, image_w)
-
-    if base_heading is not None:
-        final_heading = _norm_angle(base_heading + heading_offset)
-    else:
-        final_heading = None
+    stored_heading = round(float(base_heading), 3) if base_heading is not None else None
 
     if road_status != "ok" or road_lat is None or road_lon is None or road_bearing is None:
         return {
@@ -436,7 +468,7 @@ def _candidate_search(
             "best_candidate": {
                 "lat": round(float(init_lat), 8),
                 "lon": round(float(init_lon), 8),
-                "heading_deg": round(float(final_heading), 3) if final_heading is not None else None,
+                "heading_deg": stored_heading,
                 "dist_from_init_m": 0.0,
                 "cross_offset_m": None,
                 "along_offset_m": None,
@@ -474,7 +506,7 @@ def _candidate_search(
     candidates.append({
         "lat": round(float(init_lat), 8),
         "lon": round(float(init_lon), 8),
-        "heading_deg": round(float(final_heading), 3) if final_heading is not None else None,
+        "heading_deg": stored_heading,
         "dist_from_init_m": 0.0,
         "cross_offset_m": init_cross,
         "along_offset_m": 0.0,
@@ -504,18 +536,28 @@ def _candidate_search(
             candidates.append({
                 "lat": round(float(lat), 8),
                 "lon": round(float(lon), 8),
-                "heading_deg": round(float(final_heading), 3) if final_heading is not None else None,
+                "heading_deg": stored_heading,
                 "dist_from_init_m": round(float(dist_from_init), 3),
                 "cross_offset_m": round(float(cross), 3),
                 "along_offset_m": round(float(along), 3),
                 "score": round(float(score), 6),
             })
 
+    if bool(cfg.get("prefer_init_camera_position", True)):
+        max_shift_m = float(cfg.get("max_camera_shift_from_init_m", 12.0))
+        init_bonus = float(cfg.get("init_position_score_bonus", 0.15))
+        for cand in candidates:
+            if float(cand.get("dist_from_init_m", 1e18)) <= max_shift_m:
+                cand["score"] = round(
+                    min(1.0, float(cand.get("score", 0.0)) + init_bonus),
+                    6,
+                )
+
     candidates.sort(key=lambda item: item["score"], reverse=True)
     best = candidates[0] if candidates else {
         "lat": round(float(init_lat), 8),
         "lon": round(float(init_lon), 8),
-        "heading_deg": round(float(final_heading), 3) if final_heading is not None else None,
+        "heading_deg": stored_heading,
         "dist_from_init_m": 0.0,
         "cross_offset_m": None,
         "along_offset_m": None,
@@ -563,14 +605,29 @@ def refine_camera_pose(
         seed_source = "manual"
         init_lat = manual_lat_f
         init_lon = manual_lon_f
-    elif "lat" in coarse_seed and "lon" in coarse_seed:
+    coarse_has = "lat" in coarse_seed and "lon" in coarse_seed
+    exif_has = (
+            exif_seed.get("lat") is not None
+            and exif_seed.get("lon") is not None
+            and -90.0 <= float(exif_seed.get("lat")) <= 90.0
+            and -180.0 <= float(exif_seed.get("lon")) <= 180.0
+    )
+    coarse_conf = _safe_float(coarse_seed.get("confidence"))
+    min_coarse_conf = float(cfg.get("min_coarse_seed_confidence", 0.45))
+    coarse_trusted = coarse_has and (coarse_conf is None or float(coarse_conf) >= min_coarse_conf)
+
+    if coarse_trusted:
         seed_source = "coarse"
         init_lat = coarse_seed.get("lat")
         init_lon = coarse_seed.get("lon")
-    elif "lat" in exif_seed and "lon" in exif_seed:
+    elif exif_has:
         seed_source = "exif"
         init_lat = exif_seed.get("lat")
         init_lon = exif_seed.get("lon")
+    elif coarse_has:
+        seed_source = "coarse"
+        init_lat = coarse_seed.get("lat")
+        init_lon = coarse_seed.get("lon")
 
     exif_heading = manual_az_f if manual_az_f is not None else exif_seed.get("heading_deg")
     active_seed = coarse_seed if seed_source == "coarse" else exif_seed
@@ -692,6 +749,7 @@ def refine_camera_pose(
         cfg=cfg,
         artifacts=artifacts,
         image_w=int(image_w),
+        scene_features=scene_features,
     )
 
     best_candidate = candidate_search.get("best_candidate", {}) or {}

@@ -734,6 +734,504 @@ static void flattenJsonToObject(const QString& prefix, const QJsonValue& v, QJso
     out->insert(prefix, v);
 }
 
+static double jsonToDoubleSafe(const QJsonValue& v, double fallback = 0.0) {
+    if (v.isDouble()) return v.toDouble();
+    if (v.isString()) {
+        bool ok = false;
+        const double d = v.toString().toDouble(&ok);
+        if (ok) return d;
+    }
+    return fallback;
+}
+
+static QPixmap makePlotCanvas(int w = 1100, int h = 620) {
+    QImage img(w, h, QImage::Format_ARGB32);
+    img.fill(QColor(250, 251, 253));
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(220, 223, 230), 1));
+    for (int x = 80; x < w - 40; x += 80) p.drawLine(x, 40, x, h - 70);
+    for (int y = 40; y < h - 70; y += 60) p.drawLine(80, y, w - 40, y);
+    p.setPen(QPen(QColor(60, 66, 80), 2));
+    p.drawLine(80, h - 70, w - 40, h - 70);
+    p.drawLine(80, 40, 80, h - 70);
+    p.end();
+    QPixmap pm = QPixmap::fromImage(img);
+    pm.setDevicePixelRatio(1.0);
+    return pm;
+}
+
+static QPixmap buildClassesPlot(const ModuleResult& r) {
+    QMap<QString, int> counts;
+    for (const Detection& d : r.detections) {
+        const QString cls = d.clsName.trimmed().isEmpty() ? QStringLiteral("unknown") : d.clsName.trimmed().toLower();
+        counts[cls] += 1;
+    }
+
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(26);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 900, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Распределение классов (кластер)"));
+
+    if (counts.isEmpty()) {
+        QFont f = p.font();
+        f.setBold(false);
+        f.setPixelSize(18);
+        p.setFont(f);
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет детекций для построения графика."));
+        p.end();
+        return pm;
+    }
+
+    const int n = counts.size();
+    int maxCount = 1;
+    for (auto it = counts.begin(); it != counts.end(); ++it) maxCount = qMax(maxCount, it.value());
+
+    const int x0 = 110;
+    const int y0 = 520;
+    const int plotW = 900;
+    const int plotH = 430;
+    const int barW = qMax(24, plotW / (n * 2));
+    const int gap = qMax(20, (plotW - n * barW) / qMax(1, n));
+
+    int i = 0;
+    for (auto it = counts.begin(); it != counts.end(); ++it, ++i) {
+        const int h = int((double(it.value()) / double(maxCount)) * (plotH - 20));
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        const QRect rc(x, y0 - h, barW, h);
+        QColor c(76, 132, 255);
+        const QString cls = it.key();
+        if (cls == "truck") c = QColor(230, 57, 70);
+        else if (cls == "bus") c = QColor(33, 150, 243);
+        else if (cls == "motorcycle") c = QColor(33, 33, 33);
+        else if (cls == "car") c = QColor(46, 170, 80);
+        p.fillRect(rc, c);
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(rc);
+        p.drawText(QRect(x - 10, y0 + 8, barW + 20, 24), Qt::AlignHCenter | Qt::AlignTop, cls);
+        p.drawText(QRect(x - 10, y0 - h - 26, barW + 20, 22), Qt::AlignHCenter | Qt::AlignBottom, QString::number(it.value()));
+    }
+    p.end();
+    return pm;
+}
+
+static QPixmap buildConfidencePlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(26);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 900, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Уверенность детекций"));
+
+    if (r.detections.isEmpty()) {
+        QFont f = p.font();
+        f.setBold(false);
+        f.setPixelSize(18);
+        p.setFont(f);
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет детекций для построения графика."));
+        p.end();
+        return pm;
+    }
+
+    const int binsN = 10;
+    QVector<int> bins(binsN, 0);
+    for (const Detection& d : r.detections) {
+        const double conf = std::clamp(d.conf, 0.0, 1.0);
+        int idx = int(conf * binsN);
+        if (idx >= binsN) idx = binsN - 1;
+        bins[idx] += 1;
+    }
+    int maxCount = 1;
+    for (int v : bins) maxCount = qMax(maxCount, v);
+
+    const int x0 = 110;
+    const int y0 = 520;
+    const int plotW = 900;
+    const int plotH = 430;
+    const int barW = qMax(18, plotW / (binsN * 2));
+    const int gap = qMax(10, (plotW - binsN * barW) / qMax(1, binsN));
+
+    for (int i = 0; i < binsN; ++i) {
+        const int h = int((double(bins[i]) / double(maxCount)) * (plotH - 20));
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        const QRect rc(x, y0 - h, barW, h);
+        p.fillRect(rc, QColor(255, 179, 0));
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(rc);
+        const double left = i / 10.0;
+        const QString binLabel = QStringLiteral("%1-%2").arg(left, 0, 'f', 1).arg(left + 0.1, 0, 'f', 1);
+        p.drawText(QRect(x - 14, y0 + 8, barW + 28, 24), Qt::AlignHCenter | Qt::AlignTop, binLabel);
+        p.drawText(QRect(x - 10, y0 - h - 26, barW + 20, 22), Qt::AlignHCenter | Qt::AlignBottom, QString::number(bins[i]));
+    }
+    p.end();
+    return pm;
+}
+
+static QPixmap buildTimingsPlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(26);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 900, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Тайминги системы (ms)"));
+
+    QVector<QPair<QString, double>> vals;
+    const QJsonObject t = r.timingsMs;
+    for (auto it = t.begin(); it != t.end(); ++it) {
+        vals.push_back(qMakePair(it.key(), qMax(0.0, jsonToDoubleSafe(it.value(), 0.0))));
+    }
+    if (vals.isEmpty()) {
+        QFont f = p.font();
+        f.setBold(false);
+        f.setPixelSize(18);
+        p.setFont(f);
+        p.drawText(QRect(90, 260, 980, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет timings_ms в результате."));
+        p.end();
+        return pm;
+    }
+    std::sort(vals.begin(), vals.end(), [](const auto& a, const auto& b){ return a.second > b.second; });
+    if (vals.size() > 8) vals.resize(8);
+
+    double maxV = 1.0;
+    for (const auto& v : vals) maxV = qMax(maxV, v.second);
+
+    const int x0 = 110;
+    const int y0 = 520;
+    const int plotW = 900;
+    const int plotH = 430;
+    const int n = vals.size();
+    const int barW = qMax(20, plotW / (n * 2));
+    const int gap = qMax(12, (plotW - n * barW) / qMax(1, n));
+
+    for (int i = 0; i < n; ++i) {
+        const int h = int((vals[i].second / maxV) * (plotH - 20));
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        const QRect rc(x, y0 - h, barW, h);
+        p.fillRect(rc, QColor(123, 104, 238));
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(rc);
+        p.drawText(QRect(x - 10, y0 - h - 26, barW + 20, 22), Qt::AlignHCenter | Qt::AlignBottom,
+                   QString::number(vals[i].second, 'f', 0));
+        QString lbl = vals[i].first;
+        if (lbl.size() > 16) lbl = lbl.left(16) + "...";
+        p.save();
+        p.translate(x + barW / 2, y0 + 10);
+        p.rotate(-40.0);
+        p.drawText(QRect(-70, 0, 140, 20), Qt::AlignCenter, lbl);
+        p.restore();
+    }
+    p.end();
+    return pm;
+}
+
+static QPixmap buildPipelinePlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(26);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 980, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Full Distance: 4 кластера пайплайна"));
+
+    struct Stage { QString key; QString label; bool ok; };
+    QVector<Stage> stages;
+    const QJsonObject a = r.artifacts;
+    stages.push_back({QStringLiteral("coarse_geo_search"), QStringLiteral("1. Coarse Geo"), a.contains("coarse_geo_search")});
+    stages.push_back({QStringLiteral("camera_refine"), QStringLiteral("2. Camera Refine"), a.contains("camera_refine")});
+    stages.push_back({QStringLiteral("vehicle_geo"), QStringLiteral("3. Vehicle Geo"), a.contains("vehicle_geo")});
+    stages.push_back({QStringLiteral("validation_eval"), QStringLiteral("4. Validation"), a.contains("validation_eval")});
+
+    int okCount = 0;
+    for (const Stage& s : stages) if (s.ok) okCount++;
+    const int x0 = 130;
+    const int y = 290;
+    const int step = 220;
+    const int rNode = 44;
+
+    p.setPen(QPen(QColor(120, 130, 150), 4));
+    for (int i = 0; i + 1 < stages.size(); ++i) {
+        p.drawLine(x0 + i * step + rNode, y, x0 + (i + 1) * step - rNode, y);
+    }
+
+    for (int i = 0; i < stages.size(); ++i) {
+        const int cx = x0 + i * step;
+        const QColor fill = stages[i].ok ? QColor(67, 160, 71) : QColor(244, 67, 54);
+        p.setBrush(fill);
+        p.setPen(QPen(Qt::white, 2));
+        p.drawEllipse(QPoint(cx, y), rNode, rNode);
+        p.setPen(Qt::white);
+        QFont nf = p.font();
+        nf.setBold(true);
+        nf.setPixelSize(24);
+        p.setFont(nf);
+        p.drawText(QRect(cx - 18, y - 18, 36, 36), Qt::AlignCenter, stages[i].ok ? QStringLiteral("✓") : QStringLiteral("!"));
+        p.setPen(QColor(25, 28, 36));
+        QFont lf = p.font();
+        lf.setBold(false);
+        lf.setPixelSize(14);
+        p.setFont(lf);
+        p.drawText(QRect(cx - 90, y + 56, 180, 40), Qt::AlignHCenter | Qt::AlignTop, stages[i].label);
+    }
+
+    QFont sf = p.font();
+    sf.setBold(false);
+    sf.setPixelSize(18);
+    p.setFont(sf);
+    p.setPen(QColor(35, 40, 50));
+    p.drawText(QRect(90, 80, 980, 30), Qt::AlignLeft | Qt::AlignVCenter,
+               QStringLiteral("Пройдено этапов: %1 / 4").arg(okCount));
+    p.end();
+    return pm;
+}
+
+static bool detectionDistanceM(const Detection& d, double& out) {
+    out = 0.0;
+    const QJsonValue a = d.meta.value(QStringLiteral("distance_m"));
+    const QJsonValue b = d.meta.value(QStringLiteral("dist_m"));
+    const QJsonValue c = d.meta.value(QStringLiteral("r_pos"));
+    double v = jsonToDoubleSafe(a, -1.0);
+    if (v <= 0.0) v = jsonToDoubleSafe(b, -1.0);
+    if (v <= 0.0) v = jsonToDoubleSafe(c, -1.0);
+    if (v <= 0.0) return false;
+    out = v;
+    return true;
+}
+
+static QPixmap buildAreaDistributionPlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(24);
+    p.setFont(tf);
+    p.setPen(QColor(25, 28, 36));
+    p.drawText(QRect(90, 10, 930, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Распределение площадей bbox (px²)"));
+
+    if (r.detections.isEmpty()) {
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет детекций."));
+        p.end();
+        return pm;
+    }
+
+    QVector<double> areas;
+    areas.reserve(r.detections.size());
+    for (const Detection& d : r.detections) {
+        const int w = qMax(0, d.x2 - d.x1);
+        const int h = qMax(0, d.y2 - d.y1);
+        if (w > 0 && h > 0) areas.push_back(double(w) * double(h));
+    }
+    if (areas.isEmpty()) {
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет валидных bbox."));
+        p.end();
+        return pm;
+    }
+
+    const double minA = *std::min_element(areas.begin(), areas.end());
+    const double maxA = *std::max_element(areas.begin(), areas.end());
+    const int binsN = 12;
+    QVector<int> bins(binsN, 0);
+    const double span = qMax(1.0, maxA - minA);
+    for (double a : areas) {
+        int idx = int(((a - minA) / span) * binsN);
+        if (idx >= binsN) idx = binsN - 1;
+        if (idx < 0) idx = 0;
+        bins[idx]++;
+    }
+    int maxCount = 1;
+    for (int v : bins) maxCount = qMax(maxCount, v);
+
+    const int x0 = 110, y0 = 520, plotW = 900, plotH = 430;
+    const int barW = qMax(14, plotW / (binsN * 2));
+    const int gap = qMax(8, (plotW - binsN * barW) / qMax(1, binsN));
+    for (int i = 0; i < binsN; ++i) {
+        const int h = int((double(bins[i]) / double(maxCount)) * (plotH - 20));
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        QRect rc(x, y0 - h, barW, h);
+        p.fillRect(rc, QColor(0, 188, 212));
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(rc);
+    }
+    p.drawText(QRect(110, 540, 900, 24), Qt::AlignLeft, QStringLiteral("min=%1, max=%2, n=%3")
+               .arg(minA, 0, 'f', 0).arg(maxA, 0, 'f', 0).arg(areas.size()));
+    p.end();
+    return pm;
+}
+
+static QPixmap buildAspectRatioPlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(24);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 930, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Гистограмма aspect ratio (w/h)"));
+
+    QVector<double> ratios;
+    for (const Detection& d : r.detections) {
+        const int w = d.x2 - d.x1;
+        const int h = d.y2 - d.y1;
+        if (w > 0 && h > 0) ratios.push_back(double(w) / double(h));
+    }
+    if (ratios.isEmpty()) {
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет валидных bbox."));
+        p.end();
+        return pm;
+    }
+
+    const int binsN = 10;
+    QVector<int> bins(binsN, 0);
+    const double minR = 0.2;
+    const double maxR = 4.0;
+    const double span = maxR - minR;
+    for (double rVal : ratios) {
+        const double rr = std::clamp(rVal, minR, maxR);
+        int idx = int(((rr - minR) / span) * binsN);
+        if (idx >= binsN) idx = binsN - 1;
+        bins[idx]++;
+    }
+    int maxCount = 1;
+    for (int v : bins) maxCount = qMax(maxCount, v);
+
+    const int x0 = 110, y0 = 520, plotW = 900, plotH = 430;
+    const int barW = qMax(16, plotW / (binsN * 2));
+    const int gap = qMax(10, (plotW - binsN * barW) / qMax(1, binsN));
+    for (int i = 0; i < binsN; ++i) {
+        const int h = int((double(bins[i]) / double(maxCount)) * (plotH - 20));
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        QRect rc(x, y0 - h, barW, h);
+        p.fillRect(rc, QColor(255, 112, 67));
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(rc);
+    }
+    p.drawText(QRect(110, 540, 900, 24), Qt::AlignLeft, QStringLiteral("диапазон: 0.2..4.0, n=%1").arg(ratios.size()));
+    p.end();
+    return pm;
+}
+
+static QPixmap buildDistanceConfidenceScatterPlot(const ModuleResult& r) {
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(24);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 930, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Scatter: distance vs confidence"));
+
+    QVector<QPointF> pts;
+    for (const Detection& d : r.detections) {
+        double dist = 0.0;
+        if (!detectionDistanceM(d, dist)) continue;
+        pts.push_back(QPointF(dist, std::clamp(d.conf, 0.0, 1.0)));
+    }
+    if (pts.isEmpty()) {
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет distance_m / dist_m / r_pos в detections.meta."));
+        p.end();
+        return pm;
+    }
+
+    double minX = pts[0].x(), maxX = pts[0].x();
+    for (const QPointF& pt : pts) { minX = qMin(minX, pt.x()); maxX = qMax(maxX, pt.x()); }
+    const double spanX = qMax(1.0, maxX - minX);
+    const int x0 = 110, y0 = 520, plotW = 900, plotH = 430;
+
+    p.setBrush(QColor(76, 175, 80, 180));
+    p.setPen(Qt::NoPen);
+    for (const QPointF& pt : pts) {
+        const double nx = (pt.x() - minX) / spanX;
+        const double ny = std::clamp(pt.y(), 0.0, 1.0);
+        const int x = x0 + int(nx * plotW);
+        const int y = y0 - int(ny * plotH);
+        p.drawEllipse(QPoint(x, y), 4, 4);
+    }
+    p.setPen(QColor(35, 40, 50));
+    p.drawText(QRect(110, 540, 900, 24), Qt::AlignLeft,
+               QStringLiteral("distance range: %1..%2 m, n=%3")
+                   .arg(minX, 0, 'f', 1).arg(maxX, 0, 'f', 1).arg(pts.size()));
+    p.end();
+    return pm;
+}
+
+static QPixmap buildClassConfidenceStatsPlot(const ModuleResult& r) {
+    QMap<QString, QVector<double>> byClass;
+    for (const Detection& d : r.detections) {
+        const QString cls = d.clsName.trimmed().isEmpty() ? QStringLiteral("unknown") : d.clsName.trimmed().toLower();
+        byClass[cls].push_back(std::clamp(d.conf, 0.0, 1.0));
+    }
+
+    QPixmap pm = makePlotCanvas();
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QColor(25, 28, 36));
+    QFont tf = p.font();
+    tf.setBold(true);
+    tf.setPixelSize(24);
+    p.setFont(tf);
+    p.drawText(QRect(90, 10, 930, 30), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Mean±STD confidence по классам"));
+
+    if (byClass.isEmpty()) {
+        p.drawText(QRect(90, 260, 900, 40), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Нет детекций."));
+        p.end();
+        return pm;
+    }
+
+    QVector<QString> keys = byClass.keys().toVector();
+    std::sort(keys.begin(), keys.end());
+    const int n = keys.size();
+    const int x0 = 110, y0 = 520, plotW = 900, plotH = 430;
+    const int barW = qMax(24, plotW / (n * 2));
+    const int gap = qMax(14, (plotW - n * barW) / qMax(1, n));
+
+    for (int i = 0; i < n; ++i) {
+        const QVector<double>& vals = byClass[keys[i]];
+        double mean = 0.0;
+        for (double v : vals) mean += v;
+        mean /= qMax(1, vals.size());
+        double var = 0.0;
+        for (double v : vals) var += (v - mean) * (v - mean);
+        var /= qMax(1, vals.size());
+        const double stdv = std::sqrt(var);
+
+        const int x = x0 + i * (barW + gap) + gap / 2;
+        const int hMean = int(mean * plotH);
+        const QRect bar(x, y0 - hMean, barW, hMean);
+        p.fillRect(bar, QColor(126, 87, 194));
+        p.setPen(QColor(30, 30, 30));
+        p.drawRect(bar);
+
+        const int yMean = y0 - hMean;
+        const int yStdTop = y0 - int(std::clamp(mean + stdv, 0.0, 1.0) * plotH);
+        const int yStdBot = y0 - int(std::clamp(mean - stdv, 0.0, 1.0) * plotH);
+        const int cx = x + barW / 2;
+        p.setPen(QPen(QColor(20, 20, 20), 2));
+        p.drawLine(cx, yStdTop, cx, yStdBot);
+        p.drawLine(cx - 6, yStdTop, cx + 6, yStdTop);
+        p.drawLine(cx - 6, yStdBot, cx + 6, yStdBot);
+        p.drawText(QRect(x - 10, y0 + 8, barW + 20, 22), Qt::AlignHCenter | Qt::AlignTop, keys[i]);
+        p.drawText(QRect(x - 14, yMean - 24, barW + 28, 20), Qt::AlignHCenter | Qt::AlignBottom,
+                   QStringLiteral("%1").arg(mean, 0, 'f', 2));
+    }
+    p.end();
+    return pm;
+}
+
 ResultView::ResultView(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
 
@@ -1736,7 +2234,7 @@ void ResultView::rebuildPlotsTabs() {
         QPixmap pm(path);
         if (pm.isNull()) continue;
 
-        auto* lbl = new QLabel();
+        auto* lbl = new DraggableImageLabel();
         lbl->setAlignment(Qt::AlignCenter);
         lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
 
@@ -1752,6 +2250,57 @@ void ResultView::rebuildPlotsTabs() {
         pc.label = lbl;
         pc.src = pm;
         m_plotCaches.push_back(pc);
+
+        setDragPayloadOnLabel(
+            lbl,
+            pm,
+            path,
+            QStringLiteral("plot_%1").arg(QFileInfo(path).completeBaseName())
+        );
+    }
+
+    struct GeneratedPlotItem {
+        QString title;
+        QPixmap pixmap;
+    };
+    QVector<GeneratedPlotItem> generated;
+    generated.push_back({QStringLiteral("Кластер: классы"), buildClassesPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Кластер: confidence"), buildConfidencePlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Кластер: bbox area"), buildAreaDistributionPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Кластер: aspect ratio"), buildAspectRatioPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Кластер: conf stats"), buildClassConfidenceStatsPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Кластер: dist-conf scatter"), buildDistanceConfidenceScatterPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Система: тайминги"), buildTimingsPlot(m_lastResult)});
+    generated.push_back({QStringLiteral("Full Distance: 4 этапа"), buildPipelinePlot(m_lastResult)});
+
+    for (int i = 0; i < generated.size(); ++i) {
+        if (generated[i].pixmap.isNull()) continue;
+
+        auto* lbl = new DraggableImageLabel();
+        lbl->setAlignment(Qt::AlignCenter);
+        lbl->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+
+        auto* sa = new QScrollArea();
+        sa->setWidgetResizable(true);
+        sa->setFrameShape(QFrame::NoFrame);
+        sa->setWidget(lbl);
+
+        m_plots->addTab(sa, generated[i].title);
+
+        PlotCache pc;
+        pc.area = sa;
+        pc.label = lbl;
+        pc.src = generated[i].pixmap;
+        m_plotCaches.push_back(pc);
+
+        setDragPayloadOnLabel(
+            lbl,
+            generated[i].pixmap,
+            QString(),
+            QStringLiteral("generated_plot_%1_%2")
+                .arg(i)
+                .arg(QString::number(generated[i].pixmap.cacheKey()))
+        );
     }
 
     rescaleAllPlots();

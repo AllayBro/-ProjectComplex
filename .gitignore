@@ -1,4 +1,6 @@
 # YOLO weights
+/test
+/weights
 yolo/*.pt
 *.pt
 *.pt

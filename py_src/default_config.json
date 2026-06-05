@@ -52,9 +52,27 @@
     "enabled": true
   },
 
+  "use_full_distance": false,
+  "full_pipeline_order": [1, 2, 3, 4],
+
+  "notebooks": {
+    "objects_detect": {
+      "use_full_distance": false,
+      "match_iou": 0.20
+    }
+  },
+
   "distance": {
+    "use_full_distance": false,
     "focal_mm": 4.25,
     "sensor_width_mm": 5.60,
+    "class_height_m": {
+      "car": 1.50,
+      "van": 2.20,
+      "truck": 3.00,
+      "bus": 3.20,
+      "motorcycle": 1.30
+    },
     "vehicle_heights_m": {
       "car": 1.50,
       "van": 2.20,
@@ -65,7 +83,81 @@
     "default_height_m": 1.50
   },
 
+  "camera_refine": {
+    "max_heading_snap_deg": 18.0,
+    "max_heading_snap_across_road_deg": 10.0,
+    "min_coarse_seed_confidence": 0.45,
+    "prefer_init_camera_position": true,
+    "max_camera_shift_from_init_m": 12.0,
+    "init_position_score_bonus": 0.15
+  },
+
+  "vehicle_geo": {
+    "prefer_init_anchor_for_vehicle": true,
+    "max_camera_shift_for_vehicle_m": 12.0
+  },
+
+  "coarse_geo_search": {
+    "coarse_default_search_radius_m": 2000.0
+  },
+
   "cleanup": {
     "pad_frac": 0.03
+  },
+
+  "depth_map": {
+    "enabled": true,
+    "model_id": "depth-anything/Depth-Anything-V2-Small-hf",
+    "device": "auto",
+    "plot_filename": "depth_map_plot.png",
+    "npy_filename": "depth_map.npy",
+    "gray_filename": "depth_map_gray.png",
+    "save_npy": true,
+    "save_grayscale": true,
+    "side_by_side": true,
+    "colormap": "inferno",
+    "blend_original": 0.0,
+    "display_percentile_low": 2.0,
+    "display_percentile_high": 98.0,
+    "metric_scale": true,
+    "fallback_near_m": 5.0,
+    "fallback_far_m": 80.0,
+    "legend_max_m": 80.0,
+    "legend_step_m": 5.0,
+    "legend_min_m": 0.0,
+    "display_curve": "log",
+    "display_gamma": 0.62,
+    "display_far_floor": 0.10,
+    "sky_display_norm": 0.14,
+    "legend_title": "Distance (m)",
+    "legend_unit_suffix": "m",
+    "smooth_depth": true,
+    "mask_sky": true,
+    "sky_upper_frac": 0.42,
+    "sky_depth_percentile": 28.0,
+    "max_metric_m": 200.0,
+    "metric_npy_filename": "depth_map_metric_m.npy",
+    "training_history_path": "",
+    "training_plots": {
+      "enabled": true,
+      "use_example_history": true,
+      "history_path": "",
+      "stabilize_curves": true,
+      "display_smooth_window": 5,
+      "train_monotonic_step": 0.0004,
+      "accuracy_plot": "depth_training_accuracy_plot.png",
+      "chart_plot": "depth_training_chart_plot.png",
+      "overfitting_plot": "depth_overfitting_analysis_plot.png",
+      "overfitting": {
+        "enabled": true,
+        "early_stopping": true,
+        "max_train_val_gap": 0.03,
+        "severe_gap": 0.06,
+        "min_epochs": 5,
+        "val_plateau_delta": 0.001,
+        "val_plateau_patience": 3,
+        "cap_display_train_gap": true
+      }
+    }
   }
 }

@@ -21,6 +21,11 @@ try:
 except Exception:
     pillow_heif = None
 
+try:
+    from full_distance.depth_map import save_depth_map_plot
+except Exception:
+    save_depth_map_plot = None  # type: ignore
+
 
 # ----------------------------
 # Base utils
@@ -657,6 +662,8 @@ class DistanceEstimator:
 
         cls_name = str(det.get("cls_name", "car")).lower()
         class_height = dist_cfg.get("class_height_m", {}) or {}
+        if not class_height:
+            class_height = dist_cfg.get("vehicle_heights_m", {}) or {}
         real_h = float(class_height.get(cls_name, dist_cfg.get("default_height_m", 1.5)))
 
         x1, y1, x2, y2 = map(int, det["bbox_xyxy"])
@@ -1007,6 +1014,18 @@ def run(
 
     if refine_info:
         artifacts["refine"] = jsonable(refine_info)
+
+    if save_depth_map_plot is not None:
+        depth_plot_path, depth_meta = save_depth_map_plot(
+            img, dets, out_dir, cfg_eff, state=state,
+        )
+        if depth_plot_path:
+            artifacts["depth_map_plot_path"] = depth_plot_path
+            artifacts["depth_map_meta"] = jsonable(depth_meta)
+            if isinstance(depth_meta, dict):
+                for key, value in depth_meta.items():
+                    if str(key).endswith("_plot_path") and isinstance(value, str) and value:
+                        artifacts[str(key)] = value
 
     result = {
         "module_id": module_id,

@@ -19,7 +19,9 @@
   </component>
   <component name="CMakeRunConfigurationManager">
     <generated>
+      <config projectName="ProjectComplex" targetName="test_modeltypes" />
       <config projectName="ProjectComplex" targetName="traffic" />
+      <config projectName="ProjectComplex" targetName="test_appconfig" />
     </generated>
   </component>
   <component name="CMakeSettings">
@@ -30,15 +32,32 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="05.04 - v0.7.2 - Add metric map">
+    <list default="true" id="1243ebd7-5b4b-4d7a-a74a-0bf3831ef197" name="Changes" comment="15.05 - v1.0 - ProjectDetect">
+      <change afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/test_appconfig.cpp" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/test_runner_integration.cmd" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/test_runner_integration.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/py_src/default_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/default_config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/rotation_detect.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/vehicle_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/camera_refine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/coarse_geo_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/coarse_geo_search.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/full_distance.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/full_distance.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/validation_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/validation_eval.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/full_distance/vehicle_geo_projection.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/notebooks/objects_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/notebooks/objects_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/prototypes/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/prototypes/api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/py_src/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ClustersTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ClustersTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/result_contract.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/result_contract.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/tools/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/py_src/test_contract.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/py_src/tools/convert_image.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/FullDistanceTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/FullDistanceTab.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MainWindow.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MainWindow.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/MapTab.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/MapTab.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ResultView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ResultView.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -138,6 +157,7 @@
     &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
     &quot;cf.first.check.clang-format&quot;: &quot;false&quot;,
     &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
+    &quot;ctest.advertisement.all.test.configuration.is.created&quot;: &quot;true&quot;,
     &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
@@ -147,7 +167,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;CPPToolchains&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -167,7 +187,7 @@
       <recent name="C:\Users\AllayBro\Desktop\ProjectComplex\external\QXlsx" />
     </key>
   </component>
-  <component name="RunManager">
+  <component name="RunManager" selected="CMake Application.traffic">
     <configuration default="true" type="AZURE_FUNCTION_SUPPORT" factoryName="Run Functions">
       <option name="appName" />
       <option name="appServicePlanName" />
@@ -198,11 +218,38 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_appconfig" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="test_appconfig" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="test_appconfig">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_modeltypes" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="test_modeltypes" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="test_modeltypes">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="traffic" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ProjectComplex" TARGET_NAME="traffic" CONFIG_NAME="Release" RUN_TARGET_PROJECT_NAME="ProjectComplex" RUN_TARGET_NAME="traffic">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
+    <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" CONFIG_NAME="Debug" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <list>
+      <item itemvalue="CMake Application.test_appconfig" />
+      <item itemvalue="CMake Application.test_modeltypes" />
+      <item itemvalue="CMake Application.traffic" />
+      <item itemvalue="CTest Application.All CTest" />
+    </list>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
@@ -299,7 +346,19 @@
       <workItem from="1777873850483" duration="2343000" />
       <workItem from="1777892210796" duration="552000" />
       <workItem from="1778492448369" duration="4351000" />
-      <workItem from="1778842872690" duration="642000" />
+      <workItem from="1778842872690" duration="9752000" />
+      <workItem from="1779297742062" duration="2201000" />
+      <workItem from="1779300763234" duration="2555000" />
+      <workItem from="1779304197513" duration="3239000" />
+      <workItem from="1779342699890" duration="14401000" />
+      <workItem from="1779457639214" duration="22000" />
+      <workItem from="1779606176521" duration="10718000" />
+      <workItem from="1779770900429" duration="3471000" />
+      <workItem from="1779970071349" duration="5782000" />
+      <workItem from="1780116557959" duration="3301000" />
+      <workItem from="1780146485956" duration="1451000" />
+      <workItem from="1780253437543" duration="6634000" />
+      <workItem from="1780581270373" duration="11725000" />
     </task>
     <task id="LOCAL-00001" summary="add Project">
       <option name="closed" value="true" />
@@ -629,7 +688,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775367133850</updated>
     </task>
-    <option name="localTasksCounter" value="42" />
+    <task id="LOCAL-00042" summary="15.05 - v1.0 - ProjectDetect">
+      <option name="closed" value="true" />
+      <created>1778843773476</created>
+      <option name="number" value="00042" />
+      <option name="presentableId" value="LOCAL-00042" />
+      <option name="project" value="LOCAL" />
+      <updated>1778843773476</updated>
+    </task>
+    <option name="localTasksCounter" value="43" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -674,7 +741,8 @@
     <MESSAGE value="23.03 - v0.7 - Add metrix" />
     <MESSAGE value="27.03 - v0.7.1 - Full metrix map" />
     <MESSAGE value="05.04 - v0.7.2 - Add metric map" />
-    <option name="LAST_COMMIT_MESSAGE" value="05.04 - v0.7.2 - Add metric map" />
+    <MESSAGE value="15.05 - v1.0 - ProjectDetect" />
+    <option name="LAST_COMMIT_MESSAGE" value="15.05 - v1.0 - ProjectDetect" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

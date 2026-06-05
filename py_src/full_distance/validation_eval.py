@@ -9,7 +9,7 @@ import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from full_distance import run as run_full_distance
+from full_distance.full_distance import run as run_full_distance
 
 
 def _safe_float(value: Any) -> Optional[float]:

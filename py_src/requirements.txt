@@ -5,3 +5,5 @@ Pillow>=10.0.0
 pillow-heif
 onnx
 onnxruntime
+transformers>=4.45.0
+matplotlib>=3.7.0

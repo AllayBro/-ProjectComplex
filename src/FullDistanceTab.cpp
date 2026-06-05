@@ -562,6 +562,7 @@ FullDistanceTab::FullDistanceTab(const AppConfig& cfg, const QString& appDir, QW
 
         m_lastRunImagePath = in;
         m_view->clearRunKeepPreview();
+        emit pipelineRunRequested(in);
         m_runner->runFullDistance(in, out, dev, yoloPath);
     });
 

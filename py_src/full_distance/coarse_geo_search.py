@@ -34,7 +34,7 @@ def _pick_seed(artifacts: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]
         "lat": None,
         "lon": None,
         "heading_deg": None,
-        "search_radius_m": float(cfg.get("coarse_default_search_radius_m", 3000.0) or 3000.0),
+        "search_radius_m": float(cfg.get("coarse_default_search_radius_m", 2000.0) or 2000.0),
         "seed_source": "none",
     }
 
@@ -154,7 +154,7 @@ def run(
     seed = _pick_seed(artifacts, cfg)
     seed_lat = _safe_float(seed.get("lat"))
     seed_lon = _safe_float(seed.get("lon"))
-    search_radius_m = float(seed.get("search_radius_m", 3000.0) or 3000.0)
+    search_radius_m = float(seed.get("search_radius_m", 2000.0) or 2000.0)
 
     out: Dict[str, Any] = {
         "status": "no_seed",

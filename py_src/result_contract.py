@@ -375,9 +375,25 @@ def _collect_plots(module_result: Optional[Dict[str, Any]]) -> List[Dict[str, An
         low = p.lower()
         if not low.endswith((".png", ".jpg", ".jpeg", ".svg")):
             continue
-        if "plot" in str(k).lower() or "graph" in str(k).lower() or "chart" in str(k).lower():
+        kl = str(k).lower()
+        is_plot = (
+            "plot" in kl
+            or "graph" in kl
+            or "chart" in kl
+            or "depth_map" in kl
+        )
+        if is_plot:
             if _file_exists(p):
-                plots.append({"name": str(k), "path": p})
+                entry: Dict[str, Any] = {"name": str(k), "path": p}
+                if "depth_map" in kl and "training" not in kl and "overfitting" not in kl:
+                    entry["title"] = "Карта глубины"
+                elif "depth_training_accuracy" in kl:
+                    entry["title"] = "Глубина: точность (train/val)"
+                elif "depth_training_chart" in kl:
+                    entry["title"] = "График точности обучения"
+                elif "depth_overfitting" in kl:
+                    entry["title"] = "Анализ переобучения"
+                plots.append(entry)
 
     return plots
 

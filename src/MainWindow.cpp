@@ -57,6 +57,7 @@ void MainWindow::bindSignals() {
     connect(m_clusters, &ClustersTab::resultReady,   m_map, &MapTab::onResultReady);
 
     connect(m_full, &FullDistanceTab::imageSelected, m_map, &MapTab::onImageSelected);
+    connect(m_full, &FullDistanceTab::pipelineRunRequested, m_map, &MapTab::onPipelineRunRequested);
     connect(m_full, &FullDistanceTab::resultReady,   m_map, &MapTab::onResultReady);
 
     connect(m_clusters, &ClustersTab::yoloModelChanged, m_full, &FullDistanceTab::setYoloModelPath);

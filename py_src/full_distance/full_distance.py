@@ -8,6 +8,7 @@ import numpy as np
 from .camera_refine import refine_camera_pose, _read_exif_seed
 from .coarse_geo_search import run as run_coarse_geo_search
 from .vehicle_geo_projection import project_all_vehicles
+from .depth_map import save_depth_map_plot
 from prototypes.api import (
     now_ms,
     ensure_dir,
@@ -296,6 +297,16 @@ def run(image_path: str, out_dir: str, cfg: Dict[str, Any], device_mode: str = "
 
     if csv_path:
         write_csv_distance(csv_path, image_path, ctx.detections, dev.device_used, ctx.timings_ms)
+
+    depth_plot_path, depth_meta = save_depth_map_plot(
+        img, ctx.detections, out_dir, cfg, state=state,
+    )
+    if depth_plot_path:
+        ctx.artifacts["depth_map_plot_path"] = depth_plot_path
+        ctx.artifacts["depth_map_meta"] = depth_meta
+        for key, value in depth_meta.items():
+            if key.endswith("_plot_path") and isinstance(value, str) and value:
+                ctx.artifacts[key] = value
 
     return {
         "module_id": "distance_full",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -11,6 +11,61 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except Exception:
         return None
+
+
+def _normalized_vehicle_class(cls_name: Any) -> str:
+    cls = str(cls_name or "").strip().lower()
+    if cls == "van":
+        return "car"
+    return cls
+
+
+def _vehicle_dims_m(cls_id: Optional[int], cls_name: Any) -> Tuple[float, float]:
+    cls = _normalized_vehicle_class(cls_name)
+    if cls not in {"car", "truck", "bus", "motorcycle"}:
+        mapping = {2: "car", 3: "truck", 5: "bus", 7: "motorcycle"}
+        cls = mapping.get(int(cls_id)) if cls_id is not None else "car"
+    dims = {
+        "car": (4.5, 1.8),
+        "truck": (9.0, 2.5),
+        "bus": (12.0, 2.5),
+        "motorcycle": (2.1, 0.8),
+    }
+    return dims.get(cls, dims["car"])
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
+    return 2.0 * r * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
+def _projection_anchor(
+        camera_refine: Dict[str, Any],
+        cfg: Dict[str, Any],
+) -> Tuple[float, float, str]:
+    refined_lat = _safe_float(camera_refine.get("camera_refined_lat"))
+    refined_lon = _safe_float(camera_refine.get("camera_refined_lon"))
+    init_lat = _safe_float(camera_refine.get("camera_init_lat"))
+    init_lon = _safe_float(camera_refine.get("camera_init_lon"))
+
+    if refined_lat is None or refined_lon is None:
+        return 0.0, 0.0, "missing"
+
+    if init_lat is None or init_lon is None:
+        return float(refined_lat), float(refined_lon), "refined"
+
+    max_shift_m = float(cfg.get("max_camera_shift_for_vehicle_m", 12.0))
+    shift_m = _haversine_m(float(init_lat), float(init_lon), float(refined_lat), float(refined_lon))
+
+    if bool(cfg.get("prefer_init_anchor_for_vehicle", True)) and shift_m > max_shift_m:
+        return float(init_lat), float(init_lon), "init"
+
+    return float(refined_lat), float(refined_lon), "refined"
 
 
 def _norm_angle(deg: float) -> float:
@@ -174,8 +229,7 @@ def project_all_vehicles(
 ) -> Dict[str, Any]:
     cfg = cfg or {}
 
-    refined_lat = _safe_float(camera_refine.get("camera_refined_lat"))
-    refined_lon = _safe_float(camera_refine.get("camera_refined_lon"))
+    anchor_lat, anchor_lon, anchor_source = _projection_anchor(camera_refine, cfg)
     refined_az = _safe_float(camera_refine.get("camera_refined_azimuth_deg"))
     camera_conf = _safe_float(camera_refine.get("camera_confidence"))
     if camera_conf is None:
@@ -183,7 +237,7 @@ def project_all_vehicles(
 
     vehicles = _collect_vehicles(camera_refine, artifacts)
 
-    if refined_lat is None or refined_lon is None:
+    if anchor_source == "missing":
         return {
             "status": "camera_missing",
             "vehicle_lat": None,
@@ -250,14 +304,19 @@ def project_all_vehicles(
         projected_distance_m = max(min_distance_m, min(max_distance_m, projected_distance_m))
 
         vehicle_lat, vehicle_lon = _destination_point(
-            lat_deg=float(refined_lat),
-            lon_deg=float(refined_lon),
+            lat_deg=float(anchor_lat),
+            lon_deg=float(anchor_lon),
             bearing_deg=float(vehicle_bearing_deg),
             distance_m=float(projected_distance_m),
         )
 
         det_conf = _safe_float(vehicle.get("conf"))
         confidence = _vehicle_confidence(float(camera_conf), det_conf)
+
+        cls_id_raw = vehicle.get("cls_id")
+        cls_id = int(cls_id_raw) if cls_id_raw is not None else None
+        cls_name = _normalized_vehicle_class(vehicle.get("cls_name"))
+        length_m, width_m = _vehicle_dims_m(cls_id, cls_name)
 
         projected.append({
             "vehicle_lat": round(float(vehicle_lat), 8),
@@ -267,6 +326,10 @@ def project_all_vehicles(
             "vehicle_confidence": round(float(confidence), 6),
             "source_detection_index": int(vehicle.get("_source_detection_index", 0)),
             "needs_manual_review": bool(confidence < manual_threshold),
+            "cls_id": cls_id,
+            "cls_name": cls_name,
+            "length_m": round(float(length_m), 3),
+            "width_m": round(float(width_m), 3),
         })
 
     if not projected:
@@ -301,8 +364,11 @@ def project_all_vehicles(
         "vehicles": projected,
         "vehicles_count": int(len(projected)),
         "debug": {
-            "camera_lat": round(float(refined_lat), 8),
-            "camera_lon": round(float(refined_lon), 8),
+            "camera_lat": round(float(anchor_lat), 8),
+            "camera_lon": round(float(anchor_lon), 8),
+            "projection_anchor": anchor_source,
+            "camera_refined_lat": round(float(_safe_float(camera_refine.get("camera_refined_lat")) or anchor_lat), 8),
+            "camera_refined_lon": round(float(_safe_float(camera_refine.get("camera_refined_lon")) or anchor_lon), 8),
             "camera_azimuth_deg": round(float(refined_az), 3),
             "heading_fallback": heading_fallback,
             "image_w": int(image_w),

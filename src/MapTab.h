@@ -22,6 +22,7 @@ public:
 
 public slots:
     void onImageSelected(const QString& imagePath);
+    void onPipelineRunRequested(const QString& imagePath);
     void onResultReady(const QString& imagePath, const ModuleResult& r);
     void setDeviceMode(const QString& mode);
 
@@ -97,6 +98,11 @@ private:
         bool hasResult = false;
         ModuleResult result;
 
+        bool hasPipelineBaseline = false;
+        ModuleResult pipelineBaseline;
+
+        bool hasManualVehicleLayout = false;
+
         bool hasCoarseGeo = false;
         double coarseLat = 0.0;
         double coarseLon = 0.0;
@@ -140,9 +146,15 @@ private:
     void updateGeoStatus(const QString& text = QString());
     void updateGeoControlsFromSelection();
     void syncSelectedToQml();
-    void applyCoarseGeoSearch(const QJsonObject& artifactsObj, Item& out);
+    static void applyCoarseGeoSearch(const QJsonObject& artifactsObj, Item& out);
     static void clearVehicleGeo(Item& it);
-    static bool reprojectVehiclesForCurrentCamera(Item& it, QString* err = nullptr);
+    static void clearManualGeoOverrides(Item& it);
+    static void capturePipelineBaseline(Item& it, const ModuleResult& r);
+    static void reloadPipelineArtifactsFromDisk(ModuleResult& r);
+    static void applyPipelineArtifactsToItem(Item& it, const QJsonObject& artifacts);
+    static void applyFreshPipelineResult(Item& it, const ModuleResult& r);
+    static void restorePipelineGeo(Item& it);
+    static bool reprojectVehiclesForCurrentCamera(Item& it, QString* err = nullptr, bool markAsManualLayout = true);
 
     static bool readExifMini(const QString& imagePath, Item& out);
     static void applyRunnerExif(const QJsonObject& exifObj, Item& out);
