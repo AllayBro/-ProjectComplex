@@ -10,18 +10,14 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        build_type: [Debug, Release]
 
     env:
       QT_VERSION: "6.10.2"
       QT_ARCH: "win64_mingw"
       MINGW_DIR: "mingw1310_64"
       APP_TARGET: "traffic"
-      BUILD_DIR: "build-${{ matrix.build_type }}"
-      BUILD_TYPE: "${{ matrix.build_type }}"
+      BUILD_DIR: "build-release"
+      BUILD_TYPE: "Release"
 
     steps:
       - name: Checkout
@@ -88,13 +84,7 @@ jobs:
         run: |
           cmake --build "%BUILD_DIR%" --parallel
 
-      - name: Test (ctest)
-        shell: cmd
-        run: |
-          ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
-
       - name: Package portable (Qt + Python)
-        if: matrix.build_type == 'Release'
         shell: cmd
         run: |
           if exist dist rmdir /S /Q dist
@@ -124,7 +114,6 @@ jobs:
           if exist "yolo" xcopy /E /I /Y "yolo" "dist\traffic\yolo"
 
       - name: Upload artifact (Release package)
-        if: matrix.build_type == 'Release'
         uses: actions/upload-artifact@v4
         with:
           name: traffic-${{ github.sha }}

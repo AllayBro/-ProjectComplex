@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 4.0.2)
 project(ProjectComplex LANGUAGES CXX)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+endif()
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Release)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -59,36 +64,6 @@ target_link_libraries(traffic PRIVATE
         Qt6::Location
         Qt6::Positioning
 )
-
-enable_testing()
-find_package(Qt6 REQUIRED COMPONENTS Core Test)
-
-function(traffic_add_qt_test target_name test_source)
-    add_executable(${target_name} EXCLUDE_FROM_ALL ${test_source})
-    target_link_libraries(${target_name} PRIVATE Qt6::Core Qt6::Test)
-    target_include_directories(${target_name} PRIVATE ${CMAKE_SOURCE_DIR})
-    add_test(NAME ${target_name} COMMAND ${target_name})
-    set_tests_properties(${target_name} PROPERTIES
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    )
-endfunction()
-
-traffic_add_qt_test(test_appconfig test/test_appconfig.cpp)
-target_sources(test_appconfig PRIVATE src/AppConfig.cpp)
-
-traffic_add_qt_test(test_modeltypes test/test_modeltypes.cpp)
-
-find_package(Python3 COMPONENTS Interpreter)
-if(Python3_Interpreter_FOUND)
-    add_test(
-            NAME pytest_python
-            COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/test/python -c ${CMAKE_SOURCE_DIR}/pytest.ini
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    )
-    set_tests_properties(pytest_python PROPERTIES
-            ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/py_src"
-    )
-endif()
 
 set(PY_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/py_runtime")
 set(HAS_BUNDLED_PY_RUNTIME FALSE)

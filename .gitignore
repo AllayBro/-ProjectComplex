@@ -1,6 +1,22 @@
 # YOLO weights
-/test
 /weights
+# Tests (local only, not in repo)
+/test/
+/pytest.ini
+/.coveragerc
+/.coverage
+/py_src/test_contract.py
+# Python bytecode
+__pycache__/
+*.pyc
+# Local integration test output (see test/test_runner_integration.*)
+/tests/out/
+# CMake / IDE build directories
+/cmake-build-debug/
+/cmake-build-debug*/
+/cmake-build-release/
+/build/
+/build-*/
 yolo/*.pt
 *.pt
 *.pt
